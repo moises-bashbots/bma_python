@@ -339,7 +339,9 @@ public class RgbsysCriticaConsultaSSW {
 //				Utils.waitv(100);
 				
 				WebElement novaCritica=null;
-				novaCritica=this.driver.findElement(By.xpath("/html/body/div[1]/div[1]/div[22]/div[3]/div[2]/a[7]/span/button"));
+//				  /html/body/div[1]/div[1]/div[23]/div[3]/div[2]/a[7]/span/button/i
+//				novaCritica=this.driver.findElement(By.xpath("/html/body/div[1]/div[1]/div[22]/div[3]/div[2]/a[7]/span/button"));
+				novaCritica=this.driver.findElement(By.xpath("/html/body/div[1]/div[1]/div[23]/div[3]/div[2]/a[7]/span/button/i"));
 				novaCritica.click();
 //				Utils.waitv(100);
 				Utils.waitv(5);
@@ -415,7 +417,8 @@ public class RgbsysCriticaConsultaSSW {
 				}
 				
 				
-				WebElement novoStatus=this.driver.findElement(By.xpath("/html/body/div[1]/div[1]/div[22]/div[3]/div[2]/a[6]/span/button"));
+				WebElement novoStatus=null;
+				novoStatus = this.driver.findElement(By.xpath("/html/body/div[1]/div[1]/div[23]/div[3]/div[2]/a[6]/span/button"));
 //				novoStatus = this.driver.findElement(By.xpath("/html/body/div[1]/div[1]/div[22]/div[3]/div[2]/a[6]/span/button"));
 				novoStatus.click();
 				Utils.waitv(8);
