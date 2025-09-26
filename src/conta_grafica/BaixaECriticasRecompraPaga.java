@@ -25,12 +25,14 @@ public class BaixaECriticasRecompraPaga {
 	private static SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
 	private static SimpleDateFormat sdfa = new SimpleDateFormat("yyyy-MM-dd");
 	private static SimpleDateFormat sdfH=new SimpleDateFormat("yyyy-MM-dd HH:mm:SS");
+	public static HashMap<String, String> cedentesSemTarifaBaixa = new HashMap<>();
 	public static HashMap<String, Empresa> empresas = new HashMap<>();
 	public static HashMap<String, HashMap<String,Cedente>> cedentesPorEmpresa = new HashMap<String, HashMap<String,Cedente>>(); 
 	private static boolean test=false;
 	
 	public static void main(String[] args)
 	{
+		readCedentesSemTarifaBaixa();
 		Date inquiryDate = null;
 		if(args.length>0)
 		{
@@ -117,9 +119,12 @@ public class BaixaECriticasRecompraPaga {
 				}
 				else
 				{
-					rgbsysOperacaoRecompra.aceitarEfetuarBaixaRecompra(connMaria, connMSS, operacaoRecompra);
+					rgbsysOperacaoRecompra.aceitarEfetuarBaixaRecompra(connMaria, connMSS, operacaoRecompra, cedentesSemTarifaBaixa);
 				}
 				operacaoRecompra.updatePago(connMaria);
+				/*
+				 * JUST A COMMENT
+				 */
 			}
 		}
 		rgbsysOperacaoRecompra.close();
@@ -141,7 +146,7 @@ public class BaixaECriticasRecompraPaga {
 			RgbsysSeleniumQuitacaoBaixa rgbSysQuitacaoBaixa = new RgbsysSeleniumQuitacaoBaixa(operacaoRecompra); //
 		    try
 		    {
-				rgbSysQuitacaoBaixa.quitacaoBaixa();
+				rgbSysQuitacaoBaixa.quitacaoBaixa(cedentesSemTarifaBaixa);
 				rgbSysQuitacaoBaixa.close();
 		    }
 		    catch (Exception e) 
@@ -171,6 +176,27 @@ public class BaixaECriticasRecompraPaga {
 //			rgbsisLancamentoCritica.gravacaoCritica(critica);
 //		}
 //		rgbsisLancamentoCritica.close();
+	}
+	
+	public static void readCedentesSemTarifaBaixa()
+	{
+		ArrayList<String> lines = Utils.readLinesInFile("/home/robot/App/Conf/cedentesSemTarifaBaixa.conf");
+		for(String line:lines)
+		{
+			if(line.startsWith("#")&&line.trim().length()>0)
+			{
+				continue;
+			}
+			else
+			{
+				String[] fields=line.split(";");
+				String nomeCedente=fields[0];
+				if(cedentesSemTarifaBaixa.get(nomeCedente.toUpperCase())==null)
+				{
+					cedentesSemTarifaBaixa.put(nomeCedente.toUpperCase(), nomeCedente.toUpperCase());
+				}
+			}
+		}
 	}
 
 	public static Connection getConnMaria() {

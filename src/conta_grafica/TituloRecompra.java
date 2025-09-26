@@ -1032,7 +1032,7 @@ public class TituloRecompra {
 				{
 					this.vencimentoDistante=true;
 				}
-				if(antiguidadeSolicitacao>1)
+				if(antiguidadeSolicitacao>0)
 				{
 					this.solicitacaoAntiga=true;
 				}

@@ -5,6 +5,7 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 
 import org.jsoup.Jsoup;
@@ -593,7 +594,7 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         }
     }
 
-    public void quitacaoBaixa()
+    public void quitacaoBaixa(HashMap<String, String> cedentesSemTarifaBaixa)
     {
     	this.operacaoRecompra.setupVencimentos();
         String processUrl = "https://gercloud2.rgbsys.com.br/GER_BMA/operacoes/forms/RenegociacaoBorderoPesquisaNova.aspx?origem=2";
@@ -660,33 +661,39 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cbempresa_I")).sendKeys(Keys.TAB);
         Utils.waitv(7);
         
-        boolean tarifaBaixaCNABCobrado=true;
-        while (tarifaBaixaCNABCobrado)
-        {
-	        System.out.println("Tarifa baixa CNAB: " +this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getAttribute("value"));
-	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getAttribute("value").toLowerCase().contains("u"))
-	        {
-	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S_D")).click();
-	        }
-	        else {
-	        	tarifaBaixaCNABCobrado=false;
-			}
-        	Utils.waitv(2);
-        }
         
-        boolean tarifaBaixaFIDCCobrado=true;
-        while(tarifaBaixaFIDCCobrado)
-        {
-	        System.out.println("Tarifa baixa FIDC: "+this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getAttribute("value"));
-	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getAttribute("value").toLowerCase().contains("u"))
-	        {
-		        this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S_D")).click();
-	        }
-	        else {
-				tarifaBaixaFIDCCobrado=false;
-			}
-	        Utils.waitv(2);
-        }
+       
+//        Utils.waitv(200);
+        
+//        
+//        
+//        
+//        while (tarifaBaixaCNABCobrado)
+//        {
+//	        System.out.println("Tarifa baixa CNAB: " +this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getAttribute("value"));
+//	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getAttribute("value").toLowerCase().contains("u"))
+//	        {
+//	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S_D")).click();
+//	        }
+//	        else {
+//	        	tarifaBaixaCNABCobrado=false;
+//			}
+//        	Utils.waitv(2);
+//        }
+//        
+//        
+//        while(tarifaBaixaFIDCCobrado)
+//        {
+//	        System.out.println("Tarifa baixa FIDC: "+this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getAttribute("value"));
+//	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getAttribute("value").toLowerCase().contains("u"))
+//	        {
+//		        this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S_D")).click();
+//	        }
+//	        else {
+//				tarifaBaixaFIDCCobrado=false;
+//			}
+//	        Utils.waitv(2);
+//        }
         // Pop up de recompra termorario pode aparecer
         pressSystemEscKey();
         Utils.waitv(8);
@@ -724,6 +731,53 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdVencimento_I")).sendKeys(Keys.ENTER);
         Utils.waitv("After data de vencimento",7);
         
+        
+        boolean tarifaBaixaCNABCobrado=false;
+        boolean tarifaBaixaFIDCCobrado=true;
+        
+        
+        if(cedentesSemTarifaBaixa.get(this.operacaoRecompra.getCedente().getApelido().toUpperCase())!=null)
+        {
+        	tarifaBaixaCNABCobrado=false;
+        	tarifaBaixaFIDCCobrado=false;
+        }
+        else
+        {
+        	tarifaBaixaCNABCobrado=false;
+        	tarifaBaixaFIDCCobrado=true;
+        }
+       
+        if(!tarifaBaixaCNABCobrado)
+        {
+	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getDomAttribute("value").contains("c"))
+	        {
+	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).click();	        	
+	        }
+	        System.out.println("TarifaBaixaCNAB: "+tarifaBaixaCNABCobrado);
+        }
+        else {
+        	if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getDomAttribute("value").contains("u"))
+	        {
+	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).click();
+	        }
+        	Utils.waitv("TarifaBaixaCNAB: "+tarifaBaixaCNABCobrado,2);
+		}
+       
+        if(!tarifaBaixaFIDCCobrado)
+        {
+	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getDomAttribute("value").contains("c"))
+	        {
+	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).click();
+	        }
+	        System.out.println("TarifaBaixaFIDC: "+tarifaBaixaCNABCobrado);
+        }
+        else {
+        	if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getDomAttribute("value").contains("u"))
+	        {
+	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).click();	        
+	        }
+        	Utils.waitv("TarifaBaixaFIDC: "+tarifaBaixaFIDCCobrado,2);
+		}
 
         // // Pop up de recompra termorario pode aparecer
         // pressSystemEscKey();
@@ -751,16 +805,16 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         assertStringContainsAnotherString(doc.getElementById("ctl00_contentManager_ASPxPageControlRenegociacao_cbempresa_I").toString(), this.operacaoRecompra.getEmpresa().getApelido(), "Nome empresa nao contida na pagina. Abortando operacao."); 
 //        assertStringContainsAnotherString(doc.getElementById("ctl00_contentManager_ASPxPageControlRenegociacao_EdVencimento_I").attr("value").toString(), "31/12/2099", "Html inconsistente. Abortando processo.");
 
-       String valueNaoCobrarBaixa= this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getDomAttribute("value");
-       System.out.println("ValueNaoCobrarBaixa: "+valueNaoCobrarBaixa);
-       if(valueNaoCobrarBaixa.contains("U"))
-       {
-    	   this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).click();
-    	   Utils.waitv("Não cobrar tarifa de baixa CNAB - Checking!",2);
-       }
-       else {
-    	   Utils.waitv("Não cobrar tarifa de baixa CNAB - Checked already!",2);
-       }
+//       String valueNaoCobrarBaixa= this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getDomAttribute("value");
+//       System.out.println("ValueNaoCobrarBaixa: "+valueNaoCobrarBaixa);
+//       if(valueNaoCobrarBaixa.contains("U"))
+//       {
+//    	   this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).click();
+//    	   Utils.waitv("Não cobrar tarifa de baixa CNAB - Checking!",2);
+//       }
+//       else {
+//    	   Utils.waitv("Não cobrar tarifa de baixa CNAB - Checked already!",2);
+//       }
         
         // Clica em Selecao
         this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_BtSelecao")).click();

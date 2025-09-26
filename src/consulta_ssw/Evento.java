@@ -5,14 +5,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Date;
 import java.util.HashMap;
 
 public class Evento {
 	private int idEventoTransporte=0;
-	private Date dataHora=null;
+	private LocalDateTime dataHora=null;
 	private String chaveNota="";
 	private String unidade="";
 	private String tituloEvento="";
@@ -27,7 +27,7 @@ public class Evento {
 		
 	}
 	
-	public Evento(String chaveNFE, Date dataHora, String unidade, String tituloEvento, String descricaoEvento)
+	public Evento(String chaveNFE, LocalDateTime dataHora, String unidade, String tituloEvento, String descricaoEvento)
 	{
 		this.chaveNota=chaveNFE;
 		this.dataHora=dataHora;
@@ -55,7 +55,7 @@ public class Evento {
 		while(rs.next())
 		{
 			this.chaveNota=rs.getString("chave_nota");
-			this.dataHora=rs.getTime("data_hora");
+			this.dataHora=rs.getObject("data_hora",LocalDateTime.class);
 			this.unidade=rs.getString("unidade");
 			this.tituloEvento=rs.getString("titulo_evento");
 			this.descricaoEvento=rs.getString("descricao_evento");
@@ -72,7 +72,7 @@ public class Evento {
 	public void show()
 	{
 		System.out.println("______________________________________________________");
-		System.out.println("DataHora: "+sdfm.format(this.dataHora));
+		System.out.println("DataHora: "+dataHora.toString());
 		System.out.println("Unidade: "+this.unidade);
 		System.out.println("Titulo: "+this.tituloEvento);
 		System.out.println("Descricao: "+this.descricaoEvento);
@@ -204,9 +204,11 @@ public class Evento {
 	
 	public void register(Connection conn)
 	{
+		DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+
 		String query="select * from BMA.evento_transporte"
 								+ " where chave_nota="+"'"+this.chaveNota+"'"
-								+ " and data_hora="+"'"+sdfmh.format(this.dataHora)+"'";
+								+ " and data_hora="+"'"+this.dataHora.format(formatter)+"'";
 		System.out.println(query);
 		Statement st=null;
 		try {
@@ -227,15 +229,27 @@ public class Evento {
 		}
 		if(this.idEventoTransporte==0)
 		{
-			String insert="insert into BMA.evento_transporte (chave_nota, data_hora, unidade, titulo_evento, descricao_evento,ultima_tentativa)"
-										+ " values("
-										+ "'"+this.chaveNota+"'"
-										+ ","+"'"+sdfmh.format(this.dataHora)+"'"
-										+ ","+"'"+this.unidade+"'"
-										+ ","+"'"+this.tituloEvento+"'"
-										+ ","+"'"+this.descricaoEvento+"'"
-										+ ","+"'"+sdfm.format(Calendar.getInstance().getTime())+"'"
-										+ ")";
+			
+
+			String insert = "INSERT INTO BMA.evento_transporte " +
+			                "(chave_nota, data_hora, unidade, titulo_evento, descricao_evento, ultima_tentativa) " +
+			                "VALUES (" +
+			                "'" + this.chaveNota + "'," +
+			                "'" + this.dataHora.format(formatter) + "'," +
+			                "'" + this.unidade + "'," +
+			                "'" + this.tituloEvento + "'," +
+			                "'" + this.descricaoEvento + "'," +
+			                "'" + LocalDateTime.now().format(formatter) + "')";
+
+//			String insert="insert into BMA.evento_transporte (chave_nota, data_hora, unidade, titulo_evento, descricao_evento,ultima_tentativa)"
+//										+ " values("
+//										+ "'"+this.chaveNota+"'"
+//										+ ","+"'"+sdfmh.format(this.dataHora)+"'"
+//										+ ","+"'"+this.unidade+"'"
+//										+ ","+"'"+this.tituloEvento+"'"
+//										+ ","+"'"+this.descricaoEvento+"'"
+//										+ ","+"'"+sdfm.format(Calendar.getInstance().getTime())+"'"
+//										+ ")";
 			System.out.println(insert);
 			try {
 				st.executeUpdate(insert);
@@ -262,12 +276,7 @@ public class Evento {
 		}
 	}
 	
-	public Date getDataHora() {
-		return this.dataHora;
-	}
-	public void setDataHora(Date dataHora) {
-		this.dataHora = dataHora;
-	}
+
 	public String getUnidade() {
 		return this.unidade;
 	}
@@ -317,6 +326,22 @@ public class Evento {
 
 	public static void setSdfm(SimpleDateFormat sdfm) {
 		Evento.sdfm = sdfm;
+	}
+
+	public LocalDateTime getDataHora() {
+		return this.dataHora;
+	}
+
+	public void setDataHora(LocalDateTime dataHora) {
+		this.dataHora = dataHora;
+	}
+
+	public static SimpleDateFormat getSdfmh() {
+		return sdfmh;
+	}
+
+	public static void setSdfmh(SimpleDateFormat sdfmh) {
+		Evento.sdfmh = sdfmh;
 	}
 
 }

@@ -2,6 +2,7 @@ package rgbsys;
 
 import java.sql.Connection;
 import java.text.SimpleDateFormat;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
@@ -28,6 +29,8 @@ public class RgbsysCriticaConsultaSSW {
 	private String rootURL;
     public WebDriver driver;
     private JavascriptExecutor jsExecutor ;
+	private static DateTimeFormatter dtfs = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
 	private static SimpleDateFormat sdfr=new SimpleDateFormat("dd/MM/yyyy");
 	private static SimpleDateFormat sdfm=new SimpleDateFormat("yyyy-MM-dd");
 	private static SimpleDateFormat sdfmh=new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
@@ -312,7 +315,8 @@ public class RgbsysCriticaConsultaSSW {
 			for(Evento evento:eventosCadastrados)
 			{
 				evento.show();
-				textCriticas+=sdfm.format(evento.getDataHora())+" "+evento.getTituloEvento()+" ";
+//				textCriticas+=sdfm.format(evento.getDataHora())+" "+evento.getTituloEvento()+" ";
+				textCriticas+=evento.getDataHora().format(dtfs)+" "+evento.getTituloEvento()+" ";
 				if(evento.getTituloEvento().toLowerCase().contains("previsao de entrega"))
 				{
 					emTransporte=true;

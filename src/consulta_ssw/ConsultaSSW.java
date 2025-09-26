@@ -3,11 +3,12 @@ package consulta_ssw;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 
@@ -24,6 +25,9 @@ public class ConsultaSSW {
 	
 	private ArrayList<TituloParaChecagem> titulosParaChecagem = new ArrayList<>();
 	private HashMap<String, HashMap<String, String>> chavesParaConsulta = new HashMap<>();
+	private static DateTimeFormatter dtf = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss");
+	private static DateTimeFormatter dtfe = DateTimeFormatter.ofPattern("dd/MM/yy");
+
 	private static SimpleDateFormat sdfe = new SimpleDateFormat("dd/MM/yyyy HH:mm:SS");
 	private static SimpleDateFormat sdfm = new SimpleDateFormat("yyyy-MM-dd");
 	private static SimpleDateFormat sdfs = new SimpleDateFormat("dd/MM/yy");
@@ -178,15 +182,18 @@ public class ConsultaSSW {
 		System.out.println("Consultando: "+chaveNFE);
 		WebElement inputChaveNFE=ConsultaSSW.driver.findElement(By.id("danfe"));
 		inputChaveNFE.sendKeys(chaveNFE);
-		Utils.waitv(0.75);
+		Utils.waitv(1.0);
 		try {
 			List<WebElement> errors = ConsultaSSW.driver.findElements(By.id("erro"));
 			if(!errors.isEmpty())
 			{
-				if(errors.get(0).getText().toLowerCase().contains("danfe não localizada"))
+				if(errors.size()>0)
 				{
-					System.out.println("DANFE não localizada!");
-					return eventos;
+					if(errors.get(0).getText().toLowerCase().contains("danfe não localizada"))
+					{
+						System.out.println("DANFE não localizada!");
+						return eventos;
+					}
 				}
 				else {
 					success=true;				
@@ -263,14 +270,18 @@ public class ConsultaSSW {
 					String[] fields=row.getText().split(":");
 					if(fields[1].trim().length()==8)
 					{
-						Date dataEvento=null;
-						try {
-							dataEvento = sdfs.parse(fields[1].trim());
-							 eventoPrevisao=new Evento(chaveNFE, dataEvento, "Transportista", "PREVISAO DE ENTREGA", "PREVISAO DE ENTREGA");			
-							 eventoPrevisao.show();
-						} catch (ParseException e) {
-							e.printStackTrace();
+						LocalDateTime dataEvento=null;
+						String dateToParse =fields[1].trim();
+						System.out.println("DateToParse: "+dateToParse);
+						if(dateToParse.length()==8)
+						{
+							LocalDate dateDataEvento = LocalDate.parse(dateToParse,dtfe);
+							 dataEvento = dateDataEvento.atStartOfDay();
 						}
+						System.out.println(fields[1].trim());
+						 eventoPrevisao=new Evento(chaveNFE, dataEvento, "Transportista", "PREVISAO DE ENTREGA", "PREVISAO DE ENTREGA");			
+						 eventoPrevisao.show();
+//						Utils.waitv("Correct here ", 200);
 					}
 					System.out.println(row.getText());
 				}
@@ -300,7 +311,7 @@ public class ConsultaSSW {
 				}
 				List<WebElement> cols = row.findElements(By.tagName("td"));
 				int iCol=0;
-				Date dataEvento=null;			
+				LocalDateTime dataEvento=null;			
 				String unidade="";
 				String tituloEvento="";
 				String descricaoEvento="";
@@ -309,17 +320,18 @@ public class ConsultaSSW {
 //					System.out.println(iCol+": "+col.getText());
 					switch (iCol) {
 					case 0:
-						try {
+						
 							String toParse=col.getText().replaceAll("\n", " ").trim()+":00";
 //							System.out.println("ToParseBefore: "+toParse);
 							toParse=toParse.substring(0,6)+"20"+toParse.substring(6);
 //							System.out.println("ToParseAfter: "+toParse);
-							dataEvento=sdfe.parse(toParse);
+							//dataEvento=sdfe.parse(toParse);
+							
+							System.out.println(toParse);
+							dataEvento = LocalDateTime.parse(toParse,dtf);
 							System.out.println("--");
 							System.out.println("DataEvento: "+dataEvento);
-						} catch (ParseException e) {
-							e.printStackTrace();
-						}
+					
 						break;
 					case 1:
 						unidade=col.getText().replaceAll("\n", " ");

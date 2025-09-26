@@ -1140,24 +1140,19 @@ public class CobrancaPIX
 		}
 		
 		BufferedReader bufferedReader = null;
+		StringBuilder response = new StringBuilder();
 		try {
 			bufferedReader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-
-		StringBuilder response = new StringBuilder();
-		String line = null;
-		try {
-			while ((line = bufferedReader.readLine()) != null) {
-				response.append(line);
+			String line = null;
+			try {
+				while ((line = bufferedReader.readLine()) != null) {
+					response.append(line);
+				}
+				
+				bufferedReader.close();
+			} catch (IOException e) {
+				e.printStackTrace();
 			}
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-
-		try {
-			bufferedReader.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
