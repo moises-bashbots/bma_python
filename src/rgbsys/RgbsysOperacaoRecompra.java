@@ -487,7 +487,10 @@ public class RgbsysOperacaoRecompra extends RgbsysSeleniumWebFactView {
     		                	 System.out.println("CedenteCOBRA TARIFA");
 							}
     		                 System.out.println("");
-       		                 Utils.waitv("Be fast and identify where to click", 200);
+    		                 pressSystemEscKey();    		                 
+    		                 Utils.waitv(4);
+       		                 
+       		                 
     		                 int iTitulo=0;
     		                 for(TituloRecompra tituloRecompraBaixado:operacaoRecompra.getTitulosRecompra())
     	                     {
@@ -506,7 +509,12 @@ public class RgbsysOperacaoRecompra extends RgbsysSeleniumWebFactView {
                	 if(actionTaked)
                  {
                		iRow=-1;
-               		listRows = getListRows(this.driver.getPageSource());
+               		try {
+               			listRows = getListRows(this.driver.getPageSource());	
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+               		
                  	System.out.println("Getting out from rows loop!");
                  	Utils.waitv(3);
                  	break;
