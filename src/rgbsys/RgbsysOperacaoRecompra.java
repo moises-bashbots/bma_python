@@ -1192,6 +1192,21 @@ public class RgbsysOperacaoRecompra extends RgbsysSeleniumWebFactView {
         			tituloRecompra.show();
         			double valorCorrigido=0;
     				double tarifaBaixa=operacoesRecompraValidos.get(keyOperacaoRecompra).getCedente().getTarifaBaixa();
+    				
+    				/*########
+    				 * Reduced value for the month of November
+    				 * 
+    				 * 
+    				 * 
+    				 */
+    				Calendar calNovembro2025 = Calendar.getInstance();
+    				calNovembro2025.set(2025, Calendar.NOVEMBER, 30);
+    				if(tituloRecompra.getDataSolicitacao().compareTo(calNovembro2025.getTime())<=0)
+    				{
+    					tarifaBaixa=tarifaBaixa/2.0;
+    				}
+    				
+    				
     				System.out.println("ValorOriginal: "+tituloRecompra.getValor());
     				System.out.println("ValorTotal: "+tituloRecompra.getValorTotal());
     				System.out.println("TarifaBaixa: "+tarifaBaixa);
