@@ -594,8 +594,8 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         }
     }
 
-    public void quitacaoBaixa(HashMap<String, String> cedentesSemTarifaBaixa)
-    {
+    public void quitacaoBaixa(HashMap<String, String> cedentesSemTarifaBaixa, HashMap<String, String> cedentesManterCobrancaSimples)
+    {    
     	this.operacaoRecompra.setupVencimentos();
         String processUrl = "https://gercloud2.rgbsys.com.br/GER_BMA/operacoes/forms/RenegociacaoBorderoPesquisaNova.aspx?origem=2";
         System.out.println("****************************************************");
@@ -639,7 +639,7 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         
         // Clica em pesquisar. Lista operacoes disponiveis
         this.driver.findElement(By.id("ctl00_contentManager_ASPxButtonNovaRecompra_CD")).click();
-        Utils.waitv(5);
+        Utils.waitv(10);
 //        this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdData_I")).clear();
 //        this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdData_I")).sendKeys(Keys.END);
 //        for (int i = 0; i < 10; i++)
@@ -731,9 +731,70 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdVencimento_I")).sendKeys(Keys.ENTER);
         Utils.waitv("After data de vencimento",7);
         
-        
+        boolean incidirTarifaLiquidacao=false;
         boolean tarifaBaixaCNABCobrado=false;
         boolean tarifaBaixaFIDCCobrado=true;
+        boolean enviarInstrucaoBaixaNoFIDC=true;
+        boolean enviarInstrucaoBaixaNoCNAB=true;
+        boolean deixarEmCobrancaSimples=false;
+        
+        if(cedentesManterCobrancaSimples.get(this.operacaoRecompra.getCedente().getApelido().toUpperCase())!=null)
+        {
+        	incidirTarifaLiquidacao=true;
+        	enviarInstrucaoBaixaNoCNAB=false;
+        	tarifaBaixaCNABCobrado=false;
+        	enviarInstrucaoBaixaNoFIDC=true;
+        	tarifaBaixaFIDCCobrado=false;
+        	
+        	deixarEmCobrancaSimples=true;
+        	
+        	
+        	if(incidirTarifaLiquidacao)
+        	{
+	        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKTarifa_S")).getDomAttribute("value").contains("u"))
+	 	        {
+	 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKTarifa_S")).click();	        	
+	 	        }
+        	}
+ 	        System.out.println("IncidirTarifaLiquidacao: "+incidirTarifaLiquidacao);
+
+        	
+        	if(!enviarInstrucaoBaixaNoCNAB)
+        	{
+	        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_S")).getDomAttribute("value").contains("c"))
+	 	        {
+	 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_S")).click();	        	
+	 	        }
+        	}
+ 	        System.out.println("EnviarInstrucaoBaixaNoCNAB: "+enviarInstrucaoBaixaNoCNAB);
+ 	        
+ 	   	if(enviarInstrucaoBaixaNoFIDC)
+    	{
+        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_Fidc_S")).getDomAttribute("value").contains("u"))
+ 	        {
+ 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_Fidc_S")).click();	        	
+ 	        }
+    	}
+	        System.out.println("EnviarInstrucaoBaixaNoFIDC: "+enviarInstrucaoBaixaNoFIDC);
+ 	        
+ 	       if(deixarEmCobrancaSimples)
+	       	{
+		        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKCobSimples_S")).getDomAttribute("value").contains("u"))
+		 	        {
+		 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKCobSimples_S")).click();	        	
+		 	        }
+	       	}
+	        System.out.println("EnviarInstrucaoBaixaNoCNAB: "+enviarInstrucaoBaixaNoCNAB);
+	        
+	        WebElement tipoCobrancaGrupo=this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cBtc_I"));
+	        tipoCobrancaGrupo.click();
+	        Utils.waitv(1);
+	        WebElement tableTipoCobranca=this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cBtc_DDD_L_LBT"));
+	        Utils.waitv(1);
+	        WebElement exFactor = tableTipoCobranca.findElement(By.linkText("0019 - EX_FACTOR"));
+	        exFactor.click();
+	        Utils.waitv(1);
+        }
         
         
         if(cedentesSemTarifaBaixa.get(this.operacaoRecompra.getCedente().getApelido().toUpperCase())!=null)

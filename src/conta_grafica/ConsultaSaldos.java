@@ -329,7 +329,7 @@ public class ConsultaSaldos {
 		int iSaldoNegativo=0;
 		for(Saldo saldo:saldos)
 		{
-			if(saldo.getValor()<0)
+			if(saldo.getValor()<-0.5)
 			{
 				iSaldoNegativo++;
 				System.out.println(iSaldoNegativo+"  ------");
