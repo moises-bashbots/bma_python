@@ -102,7 +102,10 @@ public class BaixaECriticasRecompraPaga {
 		ArrayList<Critica> criticasALancar = new ArrayList<>();
 		for(OperacaoRecompra operacaoRecompra:operacoesRecompraPagas)
 		{
-			if(operacaoRecompra.isPago())
+			int numeroDataRecompra = Integer.parseInt(sdfn.format(operacaoRecompra.getDataRecompra()));
+			int numeroDataAtual = Integer.parseInt(sdfn.format(Calendar.getInstance().getTime()));
+			int diaDiferente= numeroDataAtual-numeroDataRecompra;
+			if(operacaoRecompra.isPago() && diaDiferente==0)
 			{
 				System.out.println("*********************************");
 				System.out.println(" OPERAÇÃO RECOMPRA PAGA - PRONTA PARA BAIXA");

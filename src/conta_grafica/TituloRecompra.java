@@ -1021,6 +1021,10 @@ public class TituloRecompra {
 				antiguidadeSolicitacao=TimeUnit.DAYS.convert(Calendar.getInstance().getTime().getTime()-this.dataSolicitacao.getTime(), TimeUnit.MILLISECONDS);
 			}
 			
+			int numeroDataSolicicitacao=Integer.parseInt(sdfn.format(this.dataSolicitacao));
+			int numeroDataAtual=Integer.parseInt(sdfn.format(Calendar.getInstance().getTime()));
+			
+			antiguidadeSolicitacao=numeroDataAtual-numeroDataSolicicitacao;
 			
 			
 			System.out.println("VencimentoMenosSolicitacao: " + vencimentoMenosSolicitacao);

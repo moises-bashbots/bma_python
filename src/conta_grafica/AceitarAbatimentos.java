@@ -69,6 +69,8 @@ public class AceitarAbatimentos {
 		RgbsysUser.readConf();
 		RgbsysAbatimento rgbsysAbatimento = new RgbsysAbatimento();
 		ArrayList<Critica> criticas = rgbsysAbatimento.abatimento(connMaria, connMSS);
+		
+		
 		System.out.println("Total de críticas: "+criticas.size());
 		rgbsysAbatimento.close();
 		if(criticas.size()>0)

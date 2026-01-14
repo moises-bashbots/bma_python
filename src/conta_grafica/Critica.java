@@ -238,6 +238,82 @@ public class Critica {
     	return criticas;
     }
     
+    public static void SalvarCriticas(Connection connMaria, ArrayList<Critica> criticas)
+    {
+    	if(mapNomeCritica.size()==0)
+    	{
+    		populateMapNomeCritica();
+    	}
+
+    	for(Critica critica:criticas)
+    	{
+
+	        String query="select * from BMA.critica where "
+	        						+ "data_critica='"+sdf.format(critica.dataCritica)+"'"
+	   								+ " and empresa_id_empresa="+critica.empresa.getIdEmpresa()
+	   								+ " and cedente_id_cedente="+critica.cedente.getIdCedente()
+	   								+ " and tipo_critica_id_tipo_critica="+critica.tipoCritica.getIdTipoCritica()
+	        						+ " and identificacao_duplicata='"+critica.identificacaoDuplicata+"'";
+	        Statement st=null;
+	        try {
+				st=connMaria.createStatement();
+			} catch (SQLException e) {
+				e.printStackTrace();
+			}
+	        int idCritica=0;
+	        boolean registrado=false;
+	        ResultSet rs=null;
+	        try {
+				rs=st.executeQuery(query);
+				while(rs.next())
+				{
+					idCritica=rs.getInt("id_critica");
+					int registradoInt=rs.getInt("registrado");
+					if(registradoInt==1)
+					{
+						registrado=true;
+					}
+				}
+			} catch (SQLException e) {
+				e.printStackTrace();
+			}
+	        
+	        if(idCritica==0)
+	        {
+	        	String insert="insert into BMA.critica (data_critica, empresa_id_empresa, cedente_id_cedente, tipo_critica_id_tipo_critica, identificacao_duplicata)"
+	        							+ " values("
+	        							+ "'"+sdf.format(critica.dataCritica)+"'"
+	        							+ ","+critica.empresa.getIdEmpresa()
+	        							+ ","+critica.cedente.getIdCedente()
+	        							+ ","+critica.tipoCritica.getIdTipoCritica()
+	        							+ ",'"+critica.identificacaoDuplicata+"'"
+	        							+ ")";
+	        	System.out.println(insert);
+	        	try {
+					st.executeUpdate(insert);
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
+	        	Utils.waitv(0.25);
+	        	 try {
+	     			rs=st.executeQuery(query);
+	     			while(rs.next())
+	     			{
+	     				critica.idCritica=rs.getInt("id_critica");
+	     				int registradoInt=rs.getInt("registrado");
+	     				if(registradoInt==1)
+	     				{
+	     					critica.registrado=true;
+	     				}
+	     			}
+	     		} catch (SQLException e) {
+	     			e.printStackTrace();
+	     		}
+	        }
+	        critica.show();
+    	}
+    }
+    
     public static void populateMapNomeCritica()
     {
         mapNomeCritica.put("PRORROGACAO", "101 - COB - PRORROGAÇÃO");

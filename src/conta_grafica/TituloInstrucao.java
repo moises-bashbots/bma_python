@@ -129,8 +129,8 @@ public class TituloInstrucao {
 							+ " where p.Descritivo in ('CAPITAL DE GIRO NP','COB SIMPLES GARANTIA','ESCROW/EX COB SIMPLES','RENEGOCIAÇÃO','NOTA COMERCIAL','ESCROW CONCENTRADO','BOLETO OCULTO','INTERCIA CHEQUE','ESCROW BOLETO','ESCROW DEP. BMA FIDC','ESCROW DEP. BMA INTER', 'CCB','COMISSÁRIA', 'CAPITAL DE GIRO','INTERCIA','18 - COBRANÇA SIMPLES ')"
 							+ " and pc.IdProdutoAtributo =p.Id"
 							+ " and t.id_produto =pc.Id"
-							+ " and t.empresa="+"'"+this.empresa+"'"
-							+ " and t.cedente="+"'"+this.cedente+"'"
+							+ " and t.empresa="+"'"+this.empresa.getApelido()+"'"
+							+ " and t.cedente="+"'"+this.cedente.getApelido()+"'"
 							+ " and t.duplicata = '" +this.identificacaoTitulo + "'";
 		System.out.println(query);
 		
@@ -161,6 +161,9 @@ public class TituloInstrucao {
 			forbidden=true;
 		}
 //		checkTipoCobranca();
+		System.out.println("Descritivo/NomeProduto: "+this.nomeProduto);
+		System.out.println("TipoCobranca: : "+this.tipoCobranca);
+		System.out.println("Forbidden: "+forbidden);
 		return forbidden;
 	}
 

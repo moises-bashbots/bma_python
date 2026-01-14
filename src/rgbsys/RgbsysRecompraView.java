@@ -639,7 +639,7 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         
         // Clica em pesquisar. Lista operacoes disponiveis
         this.driver.findElement(By.id("ctl00_contentManager_ASPxButtonNovaRecompra_CD")).click();
-        Utils.waitv(10);
+        Utils.waitv(13);
 //        this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdData_I")).clear();
 //        this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdData_I")).sendKeys(Keys.END);
 //        for (int i = 0; i < 10; i++)
@@ -662,40 +662,8 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         Utils.waitv(7);
         
         
-       
-//        Utils.waitv(200);
-        
-//        
-//        
-//        
-//        while (tarifaBaixaCNABCobrado)
-//        {
-//	        System.out.println("Tarifa baixa CNAB: " +this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getAttribute("value"));
-//	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S")).getAttribute("value").toLowerCase().contains("u"))
-//	        {
-//	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_S_D")).click();
-//	        }
-//	        else {
-//	        	tarifaBaixaCNABCobrado=false;
-//			}
-//        	Utils.waitv(2);
-//        }
-//        
-//        
-//        while(tarifaBaixaFIDCCobrado)
-//        {
-//	        System.out.println("Tarifa baixa FIDC: "+this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getAttribute("value"));
-//	        if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S")).getAttribute("value").toLowerCase().contains("u"))
-//	        {
-//		        this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cktarbaixa_fidc_S_D")).click();
-//	        }
-//	        else {
-//				tarifaBaixaFIDCCobrado=false;
-//			}
-//	        Utils.waitv(2);
-//        }
-        // Pop up de recompra termorario pode aparecer
         pressSystemEscKey();
+        System.out.println("Escape once");
         Utils.waitv(8);
 
         // Seleciona nome do cedente
@@ -706,10 +674,15 @@ public class RgbsysRecompraView extends RgbsysSelenium {
 
         // Pop up de recompra termporario pode aparecer
         pressSystemEscKey();
-        Utils.waitv(2);
+        System.out.println("Escape once");
+        Utils.waitv(5);
+        
         pressSystemEscKey();
+        System.out.println("Escape twice");
         Utils.waitv(6);
 
+        
+        
         // Arruma data de vencimento
         this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdVencimentoInicial_I")).clear();
         this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_EdVencimentoInicial_I")).sendKeys(Keys.DELETE);
@@ -751,9 +724,10 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         	
         	if(incidirTarifaLiquidacao)
         	{
-	        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKTarifa_S")).getDomAttribute("value").contains("u"))
+	        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKTarifa_S")).getDomAttribute("value").toLowerCase().contains("u"))
 	 	        {
-	 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKTarifa_S")).click();	        	
+	 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKTarifa_S")).click();
+	 	        	Utils.waitv(2);
 	 	        }
         	}
  	        System.out.println("IncidirTarifaLiquidacao: "+incidirTarifaLiquidacao);
@@ -761,27 +735,30 @@ public class RgbsysRecompraView extends RgbsysSelenium {
         	
         	if(!enviarInstrucaoBaixaNoCNAB)
         	{
-	        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_S")).getDomAttribute("value").contains("c"))
+	        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_S")).getDomAttribute("value").toLowerCase().contains("c"))
 	 	        {
 	 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_S")).click();	        	
+	 	        	Utils.waitv(2);
 	 	        }
         	}
  	        System.out.println("EnviarInstrucaoBaixaNoCNAB: "+enviarInstrucaoBaixaNoCNAB);
  	        
  	   	if(enviarInstrucaoBaixaNoFIDC)
     	{
-        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_Fidc_S")).getDomAttribute("value").contains("u"))
+        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_Fidc_S")).getDomAttribute("value").toLowerCase().contains("u"))
  	        {
- 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_Fidc_S")).click();	        	
+ 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKBaixa_Fidc_S")).click();
+ 	        	Utils.waitv(2);
  	        }
     	}
 	        System.out.println("EnviarInstrucaoBaixaNoFIDC: "+enviarInstrucaoBaixaNoFIDC);
  	        
  	       if(deixarEmCobrancaSimples)
 	       	{
-		        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKCobSimples_S")).getDomAttribute("value").contains("u"))
+		        	 if(this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKCobSimples_S")).getDomAttribute("value").toLowerCase().contains("u"))
 		 	        {
-		 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKCobSimples_S")).click();	        	
+		 	        	this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cKCobSimples_S")).click();
+		 	        	Utils.waitv(2);
 		 	        }
 	       	}
 	        System.out.println("EnviarInstrucaoBaixaNoCNAB: "+enviarInstrucaoBaixaNoCNAB);
@@ -790,8 +767,11 @@ public class RgbsysRecompraView extends RgbsysSelenium {
 	        tipoCobrancaGrupo.click();
 	        Utils.waitv(1);
 	        WebElement tableTipoCobranca=this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cBtc_DDD_L_LBT"));
-	        Utils.waitv(1);
-	        WebElement exFactor = tableTipoCobranca.findElement(By.linkText("0019 - EX_FACTOR"));
+	        Utils.waitv(2);
+	        tableTipoCobranca=this.driver.findElement(By.id("ctl00_contentManager_ASPxPageControlRenegociacao_cBtc_DDD_L_LBT"));
+	        WebElement exFactor = tableTipoCobranca.findElement(By.tagName("td"));
+	        
+//	        exFactor = tableTipoCobranca.findElement(By.linkText("0019 - EX_FACTOR"));
 	        exFactor.click();
 	        Utils.waitv(1);
         }
