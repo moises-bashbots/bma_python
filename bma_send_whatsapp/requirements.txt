@@ -1,0 +1,18 @@
+# Dependencies for WhatsApp API integration
+infobip-api-python-client==5.1.1
+requests==2.32.4
+
+# Additional dependencies automatically installed:
+# From infobip-api-python-client:
+# - pydantic==2.10.6
+# - pydantic-core==2.27.2
+# - urllib3==2.0.7
+# - python-dateutil==2.9.0.post0
+# - typing-extensions==4.13.2
+# - annotated-types==0.7.0
+# - six==1.17.0
+# - setuptools==75.3.2
+# From requests:
+# - certifi==2025.10.5
+# - charset-normalizer==3.4.3
+# - idna==3.10

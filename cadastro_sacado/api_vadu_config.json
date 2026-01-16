@@ -1,0 +1,15 @@
+{
+  "vadu_api": {
+    "url": "https://www.vadu.com.br/vadu.dll/ServicoAnaliseOperacao/Consulta",
+    "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJWYWR1IiwidXNyIjoyMzMwNSwiZW1sIjoiaW50ZWdyYWNhby52YWR1QGRpbWVuc2EuY29tLmJyIiwiZW1wIjoyMzcyNTcwfQ.9o2wFxsn-LHZ9CfdFgjKK7pltFrf0F1yBCOLyvK1w7Y",
+    "default_params": {
+      "AtualizaCadastro": "1",
+      "ConsultaSefaz": "1",
+      "QtdFunc": "1",
+      "Ultimoserasa": "0",
+      "Filiais": "2",
+      "PrincipaisFornecedores": "1"
+    }
+  }
+}
+

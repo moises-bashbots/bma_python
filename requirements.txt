@@ -1,0 +1,16 @@
+# Consolidated dependencies for all BMA projects
+
+# Database connectors
+mysql-connector-python>=9.0.0
+pymssql>=2.3.0
+sqlalchemy>=2.0.0
+
+# HTTP clients
+requests>=2.32.0
+
+# WhatsApp API
+infobip-api-python-client==5.1.1
+
+# Build tools
+pyinstaller>=6.0.0
+

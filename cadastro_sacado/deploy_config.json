@@ -1,0 +1,9 @@
+{
+  "remote_server": {
+    "server": "192.168.193.212",
+    "user": "robot",
+    "password": "r0b0t",
+    "deploy_folder": "/home/robot/Deploy/cadastro_sacado"
+  }
+}
+

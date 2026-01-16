@@ -11,3 +11,50 @@ dist/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python build artifacts
+*.egg-info/
+*.egg
+build/
+*.whl
+*.pyz
+*.pyzw
+
+# PyInstaller
+*.spec
+build/
+dist/
+
+# Shiv cache
+.shiv/
+
+# Logs
+*.log
+sync.log
+bordero_status.log
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

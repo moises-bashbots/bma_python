@@ -1,0 +1,26 @@
+{
+  "databases": {
+    "mariadb": {
+      "server": "localhost",
+      "port": 3306,
+      "user": "robot",
+      "password": "r0b0t",
+      "scheme": "BMA"
+    },
+    "mssql": {
+      "server": "200.187.70.21",
+      "port": 1433,
+      "user": "BMA_AUTOMACAO",
+      "password": "Jfx^kO7F41Vi",
+      "scheme": "BMA"
+    },
+    "mssql_write": {
+      "server": "200.187.70.21",
+      "port": 1433,
+      "user": "usr_ai4finance_prod",
+      "password": "usr2020",
+      "scheme": "BMA"
+    }
+  }
+}
+
