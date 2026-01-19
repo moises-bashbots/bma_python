@@ -4,6 +4,7 @@ SQLAlchemy ORM models for SQL Server tables:
 - APR_TITULOS
 - APR_capa
 - cedente
+- CADASTRO_STATUS_FLUXO
 """
 
 from datetime import datetime
@@ -632,4 +633,27 @@ class Cedente(Base):
 
     def __repr__(self):
         return f"<Cedente(apelido={self.apelido}, nome={self.nome}, cnpj={self.cnpj})>"
+
+
+class CadastroStatusFluxo(Base):
+    """
+    ORM model for CADASTRO_STATUS_FLUXO table.
+    Represents workflow status definitions in the system.
+    """
+    __tablename__ = 'CADASTRO_STATUS_FLUXO'
+
+    # Primary Key
+    NOME_STATUS = Column(String(20), primary_key=True, nullable=False)
+
+    # Regular columns
+    ID = Column(Integer, nullable=False)
+    TROCA_AUTOMATICA = Column(Boolean, nullable=False, default=False)
+    SEMPRE_APARECE = Column(Boolean, nullable=False, default=False)
+    COR = Column(String(30), nullable=False, default='')
+    ENVIA_WHATSAPP = Column(Boolean, nullable=True, default=False)
+    MENSAGEM_WHATSAPP = Column(String(2000), nullable=True)
+    IDMENSAGEM_WHATSAPP = Column(String(100), nullable=True)
+
+    def __repr__(self):
+        return f"<CadastroStatusFluxo(NOME_STATUS={self.NOME_STATUS}, ID={self.ID}, COR={self.COR})>"
 
