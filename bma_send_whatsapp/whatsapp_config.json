@@ -1,7 +1,7 @@
 {
   "api_host": "api.z-api.io",
-  "instance_id": "3E8C0793B39421D6E2FD5216404C4C9A",
-  "token": "E60BAEFB617F7E208FC795A7",
+  "instance_id": "3E8CD56F7A0111FAB76A0AA2CC9C4657",
+  "token": "96D3B1BA9C19E0667C5C602E",
   "client_token": "Fe76684f81d3a4a1b8e30b6272d56df33S",
   "endpoint_path": "/instances/{instance_id}/token/{token}/send-text"
 }

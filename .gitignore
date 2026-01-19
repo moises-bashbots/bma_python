@@ -62,9 +62,14 @@ Thumbs.db
 # Configuration files with secrets
 slack_integration_alerts/slack_config.json
 slack_integration_alerts/databases_config.json
+bma_send_whatsapp/whatsapp_config.json
+bma_send_whatsapp/databases_config.json
 
 # Generated Excel reports
 *.xlsx
 slack_integration_alerts/duplicatas_invalidas/*.xlsx
 slack_integration_alerts/seuno_invalidos/*.xlsx
 slack_integration_alerts/duplicatas_invalidas/.tracking_*.json
+
+# WhatsApp message tracking
+bma_send_whatsapp/message_tracking/
