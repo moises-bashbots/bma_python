@@ -77,6 +77,18 @@ def extract_company_range_pairs(text: str) -> list[dict]:
             lookahead_text = text[company_end:company_end + 120]
 
             # Try multiple patterns to find the range number
+            # Pattern 0: Special case - "Via Webfact" means range 200
+            webfact_pattern = r'(?:via|v\.)\s*webfact'
+            webfact_match = re.search(webfact_pattern, lookahead_text, re.IGNORECASE)
+
+            if webfact_match:
+                results.append({
+                    'company': normalized_name,
+                    'range': '200',
+                    'position': company_start
+                })
+                continue
+
             # Pattern 1: After "faixa" keyword (with optional N/N, numero, etc.)
             faixa_pattern = r'(?:faixa|n/n|numero|nº|n°)[\s:\-]*(\d{1,5}|esquerda)'
             faixa_match = re.search(faixa_pattern, lookahead_text, re.IGNORECASE)
