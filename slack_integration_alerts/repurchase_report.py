@@ -682,7 +682,6 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
     New logic with business days:
     - If today is a business day: query from 16:15 of previous business day
     - If today is NOT a business day (weekend/holiday): skip query (no alerts)
-    - Only include records with tipo_operacao = 1
 
     Example scenarios:
     - Monday: Query from Friday 16:15 onwards
@@ -720,7 +719,6 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
     print(f"Today: {target_date} (BUSINESS DAY)")
     print(f"Previous business day: {previous_business_day}")
     print(f"Querying APR_CAPA for records created after: {cutoff_datetime}")
-    print(f"Filter: tipo_operacao = 1")
     print()
 
     # Create database session
@@ -731,7 +729,7 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
     try:
         # First, query APR_CAPA joined with cedente
         # APR_CAPA.CEDENTE corresponds to cedente.apelido
-        # Filter: dataentrada >= cutoff_datetime AND tipo_operacao = 1
+        # Filter: dataentrada >= cutoff_datetime
         results = session.query(
             APRCapa.DATA,
             APRCapa.NUMERO,
@@ -752,8 +750,7 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
             Cedente,
             APRCapa.CEDENTE == Cedente.apelido
         ).filter(
-            APRCapa.dataentrada >= cutoff_datetime,
-            APRCapa.tipo_operacao == 1
+            APRCapa.dataentrada >= cutoff_datetime
         ).all()
 
         print(f"✓ Found {len(results)} records in APR_CAPA for {target_date}")
@@ -799,7 +796,6 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
                 ).value('.', 'NVARCHAR(MAX)'), 1, 3, '') AS produtos
             FROM APR_capa c WITH (NOLOCK)
             WHERE c.dataentrada >= %s
-              AND c.tipo_operacao = 1
         ''', (cutoff_datetime,))
 
         produtos_por_bordero = {}
@@ -1253,10 +1249,16 @@ def send_repurchase_alerts(matched_records: List[Dict[str, Any]],
             dataentrada = record.get('apr_dataentrada')
             produtos = record.get('apr_produtos')  # Get product information
             empresa = record.get('apr_empresa')  # Get company information
+            qtd_propostos = record.get('apr_qtd_propostos')
+            vlr_propostos = record.get('apr_vlr_propostos')
+            qtd_aprovados = record.get('apr_qtd_aprovados')
+            vlr_aprovados = record.get('apr_vlr_aprovados')
 
             print(f"{i}. Cedente: {cedente_apelido} | Borderô: {numero} | Operador: {operator_name} | tipo_operacao: {tipo_operacao} | Empresa: {empresa}")
             if dataentrada:
                 print(f"   dataentrada: {dataentrada.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"   Propostos: {qtd_propostos} títulos | R$ {vlr_propostos:,.2f}")
+            print(f"   Aprovados: {qtd_aprovados} títulos | R$ {vlr_aprovados:,.2f}")
             if produtos:
                 print(f"   Produtos: {produtos}")
 
@@ -1330,8 +1332,7 @@ def send_repurchase_alerts(matched_records: List[Dict[str, Any]],
                 else:
                     print(f"   [DRY RUN] Would send alert")
                     stats['alerts_sent'] += 1
-                    # Mark alert as sent even in dry-run mode for duplicity control testing
-                    sent_alerts = mark_alert_as_sent(alert_id, today, sent_alerts)
+                    # DO NOT mark alert as sent in dry-run mode - this prevents actual alerts from being sent!
             else:
                 stats['operator_not_matched'] += 1
                 print(f"   ⚠ Could not match operator '{operator_name}' to Slack user")
@@ -1475,7 +1476,8 @@ def main():
             for i, record in enumerate(matched_records[:10], 1):
                 print(f"{i}. CEDENTE: {record['apr_cedente']}")
                 print(f"   APR: Proposta {record['apr_numero']} | Gerente: {record['apr_gerente']}")
-                print(f"   APR: Aprovados: {record['apr_qtd_aprovados']} | Valor: R$ {record['apr_vlr_aprovados']:,.2f}")
+                print(f"   APR: Propostos: {record['apr_qtd_propostos']} títulos | R$ {record['apr_vlr_propostos']:,.2f}")
+                print(f"   APR: Aprovados: {record['apr_qtd_aprovados']} títulos | R$ {record['apr_vlr_aprovados']:,.2f}")
 
                 # Display tipo_operacao and dataentrada
                 tipo_op = record.get('apr_tipo_operacao')
