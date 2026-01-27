@@ -14,3 +14,5 @@ infobip-api-python-client==5.1.1
 # Build tools
 pyinstaller>=6.0.0
 
+# Browser automation
+playwright>=1.40.0

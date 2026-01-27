@@ -16,8 +16,13 @@ from pathlib import Path
 from datetime import datetime, time
 from typing import List, Dict, Any, Optional, Set
 import json
-import mysql.connector
 import hashlib
+
+# Force mysql-connector-python to use pure Python implementation
+# This avoids issues with native plugin loading in PyInstaller binaries
+import os
+os.environ['MYSQL_CONNECTOR_PYTHON_USE_PURE'] = '1'
+import mysql.connector
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,9 +38,24 @@ from database.bma_models import ContatoWhatsapp
 from bma_send_whatsapp.send_whatsapp import send_message
 
 
+def get_executable_dir() -> Path:
+    """Get the directory where the executable/script is located."""
+    # When running as PyInstaller binary, use sys.executable
+    # When running as script, use __file__
+    if getattr(sys, 'frozen', False):
+        # Running as compiled binary
+        return Path(sys.executable).parent
+    else:
+        # Running as script
+        return Path(__file__).parent
+
+
 def load_database_config() -> dict:
     """Load database configuration from JSON file."""
+    exe_dir = get_executable_dir()
+
     config_paths = [
+        exe_dir / "databases_config.json",  # Same directory as executable
         Path(__file__).parent / "databases_config.json",
         Path(__file__).parent.parent / "slack_integration_alerts" / "databases_config.json",
         Path(__file__).parent.parent / "database" / "databases_config.json",
@@ -58,7 +78,10 @@ def load_database_config() -> dict:
 
 def load_mariadb_config() -> dict:
     """Load MariaDB configuration from JSON file."""
+    exe_dir = get_executable_dir()
+
     config_paths = [
+        exe_dir / "databases_config.json",  # Same directory as executable
         Path(__file__).parent.parent / "database" / "databases_config.json",
     ]
 
@@ -99,12 +122,15 @@ def lookup_whatsapp_contact(cedente: str, grupo: Optional[str]) -> Optional[Dict
         mariadb_config = load_mariadb_config()
 
         # Connect to MariaDB
+        # Note: Using pure Python implementation (use_pure=True)
+        # to avoid native plugin loading issues in PyInstaller binary
         conn = mysql.connector.connect(
             host=mariadb_config['server'],
             port=mariadb_config['port'],
             user=mariadb_config['user'],
             password=mariadb_config['password'],
-            database=mariadb_config['scheme']
+            database=mariadb_config['scheme'],
+            use_pure=True  # Force pure Python implementation
         )
 
         cursor = conn.cursor(dictionary=True)
@@ -177,7 +203,8 @@ def get_tracking_file_path() -> Path:
         Path to the tracking file
     """
     today = datetime.now().strftime("%Y%m%d")
-    tracking_dir = Path(__file__).parent / "message_tracking"
+    exe_dir = get_executable_dir()
+    tracking_dir = exe_dir / "message_tracking"
     tracking_dir.mkdir(exist_ok=True)
     return tracking_dir / f"sent_messages_{today}.json"
 
@@ -243,20 +270,30 @@ def generate_message_id(cedente: str, status: str, date: str, numero: int) -> st
     return hashlib.md5(unique_str.encode()).hexdigest()
 
 
-def send_alert_message(phone: str, message: str) -> bool:
+def send_alert_message(phone: str, message: str, cedente: Optional[str] = None) -> bool:
     """
     Send alert message to specified phone number.
 
     Args:
         phone: Phone number to send to
         message: Message text
+        cedente: Cedente name (optional, for logging)
 
     Returns:
         True if successful, False otherwise
     """
     try:
-        config_path = Path(__file__).parent / "whatsapp_config.json"
-        result = send_message(phone, message, str(config_path))
+        exe_dir = get_executable_dir()
+        config_path = exe_dir / "whatsapp_config.json"
+
+        # Prepare metadata for logging
+        metadata = {
+            'tipo_mensagem': 'alert',
+            'cedente': cedente,
+            'origem': 'automated'
+        }
+
+        result = send_message(phone, message, str(config_path), log_to_db=True, message_metadata=metadata)
 
         if result.get('status_code') == 200:
             print(f"✅ Alert sent to {phone}")
@@ -270,13 +307,14 @@ def send_alert_message(phone: str, message: str) -> bool:
         return False
 
 
-def send_status_message(contact: Dict[str, Any], record: Dict[str, Any]) -> bool:
+def send_status_message(contact: Dict[str, Any], record: Dict[str, Any], message_hash: Optional[str] = None) -> bool:
     """
     Send status message to WhatsApp contact based on APR_CAPA status.
 
     Args:
         contact: WhatsApp contact info
         record: APR_CAPA record data
+        message_hash: MD5 hash for duplicate detection (optional)
 
     Returns:
         True if successful, False otherwise
@@ -295,6 +333,8 @@ def send_status_message(contact: Dict[str, Any], record: Dict[str, Any]) -> bool
                 f"Em breve daremos um retorno.\n"
                 f"Obrigada (o). ✨"
             )
+            qtd_recebiveis = record['QTD_PROPOSTOS']
+            valor_total = record['VLR_PROPOSTOS']
         elif status == 'Enviado para Assinar':
             message = (
                 f"Olá,\n"
@@ -305,13 +345,33 @@ def send_status_message(contact: Dict[str, Any], record: Dict[str, Any]) -> bool
                 f"🖋️Assine aqui:\n"
                 f"https://portal.qcertifica.com.br/Authentication/Login.aspx"
             )
+            qtd_recebiveis = record['QTD_APROVADOS']
+            valor_total = record['VLR_APROVADOS']
         else:
             print(f"⚠️ Unknown status: {status}")
             return False
 
+        # Prepare metadata for logging
+        metadata = {
+            'tipo_mensagem': 'status_update',
+            'message_hash': message_hash,
+            'nome_contato': contact.get('name'),
+            'is_group': contact.get('isGroup', False),
+            'cedente': record.get('CEDENTE'),
+            'grupo': record.get('GRUPO'),
+            'data_proposta': record.get('DATA'),
+            'numero_proposta': record.get('NUMERO'),
+            'bordero': record.get('BORDERO'),
+            'status_fluxo': status,
+            'qtd_recebiveis': qtd_recebiveis,
+            'valor_total': valor_total,
+            'origem': 'automated'
+        }
+
         # Send message
-        config_path = Path(__file__).parent / "whatsapp_config.json"
-        result = send_message(phone, message, str(config_path))
+        exe_dir = get_executable_dir()
+        config_path = exe_dir / "whatsapp_config.json"
+        result = send_message(phone, message, str(config_path), log_to_db=True, message_metadata=metadata)
 
         if result.get('status_code') == 200:
             print(f"✅ Message sent to {contact['name']} ({phone})")
@@ -434,18 +494,28 @@ def query_apr_capa_with_status(target_date: str) -> List[Dict[str, Any]]:
                 # No contact found - send alert
                 print(f"⚠️ No WhatsApp contact found for {apr_capa.CEDENTE}")
                 alert_msg = f"O cedente {apr_capa.CEDENTE} ainda não tem um grupo de Whatsapp criado para a BMA."
-                send_alert_message(alert_phone, alert_msg)
+                success = send_alert_message(alert_phone, alert_msg, cedente=apr_capa.CEDENTE)
+
+                # Track the message to prevent duplicate alerts
+                if success:
+                    save_sent_message(message_id)
+                    print(f"✓ Alert tracked to prevent duplicates")
 
             elif contact.get('multiple'):
                 # Multiple contacts found - send alert
                 print(f"⚠️ Multiple WhatsApp contacts found for {apr_capa.CEDENTE} ({contact['count']} matches)")
                 alert_msg = f"Múltiplos grupos de WhatsApp encontrados para o cedente {apr_capa.CEDENTE}. Verificar cadastro."
-                send_alert_message(alert_phone, alert_msg)
+                success = send_alert_message(alert_phone, alert_msg, cedente=apr_capa.CEDENTE)
+
+                # Track the message to prevent duplicate alerts
+                if success:
+                    save_sent_message(message_id)
+                    print(f"✓ Alert tracked to prevent duplicates")
 
             else:
                 # Single contact found - send status message
                 print(f"✓ Contact found: {contact['name']} ({contact['phone']})")
-                success = send_status_message(contact, record)
+                success = send_status_message(contact, record, message_hash=message_id)
 
                 # If message was sent successfully, save the message ID
                 if success:

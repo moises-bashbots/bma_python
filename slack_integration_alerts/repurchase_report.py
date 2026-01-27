@@ -646,6 +646,9 @@ def filter_by_repurchase_type(data_list: List[RepurchaseData],
     Filter records by repurchase type (Tipo de Recompra).
     Matches with or without accents.
 
+    EXCLUSION RULE: Records containing "Operacional Questionar" are ALWAYS excluded,
+    even if they also contain "Operacao" or "Bordero".
+
     Args:
         data_list: List of RepurchaseData objects
         types: List of repurchase types to filter (default: ["Operacao", "Bordero"])
@@ -659,11 +662,18 @@ def filter_by_repurchase_type(data_list: List[RepurchaseData],
     # Normalize the search types (remove accents and convert to lowercase)
     normalized_types = [remove_accents(t).lower() for t in types]
 
+    # Exclusion pattern (normalized)
+    exclusion_pattern = remove_accents("Operacional Questionar").lower()
+
     matches = []
     for data in data_list:
         if data.tipo_recompra:
             # Normalize the data value
             normalized_value = remove_accents(str(data.tipo_recompra)).lower().strip()
+
+            # EXCLUSION RULE: Skip if contains "operacional questionar"
+            if exclusion_pattern in normalized_value:
+                continue  # Skip this record entirely
 
             # Check if any of the search types match
             for search_type in normalized_types:

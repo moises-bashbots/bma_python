@@ -635,6 +635,48 @@ class Cedente(Base):
         return f"<Cedente(apelido={self.apelido}, nome={self.nome}, cnpj={self.cnpj})>"
 
 
+class Produto(Base):
+    """
+    ORM model for Produto table.
+    Represents product types in the system.
+    """
+    __tablename__ = 'Produto'
+
+    Id = Column(Integer, primary_key=True)
+    Descritivo = Column(String(100))
+
+    def __repr__(self):
+        return f"<Produto(Id={self.Id}, Descritivo={self.Descritivo})>"
+
+
+class ProdutoAtributo(Base):
+    """
+    ORM model for ProdutoAtributo table.
+    Represents product attributes.
+    """
+    __tablename__ = 'ProdutoAtributo'
+
+    Id = Column(Integer, primary_key=True)
+    IdProduto = Column(Integer, ForeignKey('Produto.Id'))
+
+    def __repr__(self):
+        return f"<ProdutoAtributo(Id={self.Id}, IdProduto={self.IdProduto})>"
+
+
+class ProdutoCedente(Base):
+    """
+    ORM model for ProdutoCedente table.
+    Links products to cedentes.
+    """
+    __tablename__ = 'ProdutoCedente'
+
+    Id = Column(Integer, primary_key=True)
+    IdProdutoAtributo = Column(Integer, ForeignKey('ProdutoAtributo.Id'))
+
+    def __repr__(self):
+        return f"<ProdutoCedente(Id={self.Id}, IdProdutoAtributo={self.IdProdutoAtributo})>"
+
+
 class CadastroStatusFluxo(Base):
     """
     ORM model for CADASTRO_STATUS_FLUXO table.

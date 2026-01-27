@@ -4,11 +4,16 @@ Get chats from Z-API WhatsApp instance and sync to database.
 Makes a GET request to the Z-API chats endpoint and updates contato_whatsapp table.
 """
 
+import os
 import json
 import sys
 from pathlib import Path
 from typing import Optional
 import requests
+
+# Force pure Python implementation of MySQL connector (required for PyInstaller)
+os.environ['MYSQL_CONNECTOR_PYTHON_USE_PURE'] = '1'
+
 import mysql.connector
 from datetime import datetime
 
@@ -146,31 +151,37 @@ def extract_cedente_grupo(name: str, is_group: bool) -> Optional[str]:
 def map_zapi_to_db(zapi_chat: dict) -> dict:
     """
     Map Z-API chat response to database fields.
-    
+
     Args:
         zapi_chat: Single chat object from Z-API response
-        
+
     Returns:
         Dictionary with database field names and converted values
     """
     # Convert boolean to tinyint (0 or 1)
     is_group_announcement = 1 if zapi_chat.get('isGroupAnnouncement', False) else 0
     is_group = 1 if zapi_chat.get('isGroup', False) else 0
-    
+
     # Convert string numbers to integers
     messages_unread = int(zapi_chat.get('messagesUnread', 0))
     unread = int(zapi_chat.get('unread', 0))
-    
+
     # Convert string timestamp to bigint
     last_message_time = int(zapi_chat.get('lastMessageTime', 0))
-    
+
     # Extract cedente_grupo using business logic
-    name = zapi_chat.get('name', '')
+    name = zapi_chat.get('name', '').strip()
+
+    # Ensure name is never empty or NULL (required for unique constraint)
+    phone = zapi_chat.get('phone', '')
+    if not name:
+        name = f"Unknown - {phone}"
+
     cedente_grupo = extract_cedente_grupo(name, bool(is_group))
-    
+
     # Map to database fields
     db_record = {
-        'phone': zapi_chat.get('phone', ''),
+        'phone': phone,
         'name': name,
         'pinned': zapi_chat.get('pinned', 'false'),
         'messagesUnread': messages_unread,
@@ -183,7 +194,7 @@ def map_zapi_to_db(zapi_chat: dict) -> dict:
         'isMarkedSpam': zapi_chat.get('isMarkedSpam', 'false'),
         'cedente_grupo': cedente_grupo
     }
-    
+
     return db_record
 
 
@@ -235,7 +246,8 @@ def get_db_connection():
         port=cfg['port'],
         user=cfg['user'],
         password=cfg['password'],
-        database=cfg['scheme']
+        database=cfg['scheme'],
+        use_pure=True  # Force pure Python implementation
     )
 
 
@@ -243,6 +255,10 @@ def sync_chat_to_db(conn, chat_data: dict) -> tuple[str, str]:
     """
     Sync a single chat to the database.
     Uses INSERT ... ON DUPLICATE KEY UPDATE pattern.
+
+    Handles duplicate name constraint by:
+    1. First trying to update by phone (primary unique key)
+    2. If name conflict occurs, appends phone to name to make it unique
 
     Args:
         conn: Database connection
@@ -254,6 +270,7 @@ def sync_chat_to_db(conn, chat_data: dict) -> tuple[str, str]:
     cursor = conn.cursor()
 
     # SQL with ON DUPLICATE KEY UPDATE
+    # Note: phone has UNIQUE constraint, name now also has UNIQUE constraint
     sql = """
         INSERT INTO contato_whatsapp (
             phone, name, pinned, messagesUnread, unread, lastMessageTime,
@@ -276,10 +293,27 @@ def sync_chat_to_db(conn, chat_data: dict) -> tuple[str, str]:
             cedente_grupo = VALUES(cedente_grupo)
     """
 
-    cursor.execute(sql, chat_data)
+    try:
+        cursor.execute(sql, chat_data)
+        # Determine if it was an insert or update
+        action = 'inserted' if cursor.rowcount == 1 else 'updated'
 
-    # Determine if it was an insert or update
-    action = 'inserted' if cursor.rowcount == 1 else 'updated'
+    except mysql.connector.IntegrityError as e:
+        # Handle duplicate name constraint violation (error code 1062)
+        if e.errno == 1062 and 'idx_unique_name' in str(e):
+            # Name already exists for a different phone number
+            # Append phone to name to make it unique
+            original_name = chat_data['name']
+            chat_data['name'] = f"{original_name} ({chat_data['phone']})"
+
+            # Retry with modified name
+            cursor.execute(sql, chat_data)
+            action = 'inserted' if cursor.rowcount == 1 else 'updated'
+
+            print(f"  ⚠ Duplicate name '{original_name}' - renamed to '{chat_data['name']}'")
+        else:
+            # Re-raise if it's a different integrity error
+            raise
 
     cursor.close()
     return action, chat_data['phone']

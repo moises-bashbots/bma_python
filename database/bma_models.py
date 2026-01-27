@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Optional, List
 from sqlalchemy import (
     Column, Integer, String, Date, DateTime,
-    Numeric, Boolean, Text, BigInteger, ForeignKey, Index, TIMESTAMP
+    Numeric, Boolean, Text, BigInteger, ForeignKey, Index, TIMESTAMP, Enum, JSON
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
@@ -263,7 +263,7 @@ class ContatoWhatsapp(Base):
     id_contato_whatsapp = Column(Integer, primary_key=True, autoincrement=True)
     data_atualizacao = Column(TIMESTAMP, nullable=False, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     phone = Column(String(50), unique=True, nullable=False)
-    name = Column(String(255), nullable=True)
+    name = Column(String(255), unique=True, nullable=False)  # Added unique=True and nullable=False
     pinned = Column(String(10), nullable=True)
     messagesUnread = Column(Integer, nullable=True)
     unread = Column(Integer, nullable=True)
@@ -274,6 +274,73 @@ class ContatoWhatsapp(Base):
     isMuted = Column(String(10), nullable=True)
     isMarkedSpam = Column(String(10), nullable=True)
     cedente_grupo = Column(String(255), nullable=True)
+
+
+class MensagemWhatsapp(Base):
+    """WhatsApp messages history table"""
+    __tablename__ = 'mensagens_whatsapp'
+
+    # Primary Key
+    id_mensagem = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    # Message Identification
+    message_id = Column(String(255), nullable=True, comment='Unique message ID from hash or API response')
+    message_hash = Column(String(32), nullable=True, index=True, comment='MD5 hash for duplicate detection')
+
+    # Timestamp
+    data_envio = Column(TIMESTAMP, nullable=False, server_default=func.current_timestamp(), comment='Message send timestamp')
+    data_atualizacao = Column(TIMESTAMP, nullable=False, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+    # Receiver Information
+    telefone_destino = Column(String(50), nullable=False, index=True, comment='Recipient phone number')
+    nome_contato = Column(String(255), nullable=True, comment='Contact name from contato_whatsapp table')
+    is_group = Column(Boolean, default=False, comment='Whether message was sent to a group')
+
+    # Message Content
+    mensagem = Column(Text, nullable=False, comment='Full message text sent')
+    tipo_mensagem = Column(
+        Enum('status_update', 'alert', 'notification', 'manual', name='tipo_mensagem_enum'),
+        nullable=False,
+        comment='Message type/category'
+    )
+
+    # Business Context (APR_CAPA related)
+    cedente = Column(String(100), nullable=True, index=True, comment='Cedente name from APR_CAPA')
+    grupo = Column(String(100), nullable=True, comment='Grupo from cedente table')
+    data_proposta = Column(Date, nullable=True, comment='Proposal date from APR_CAPA.DATA')
+    numero_proposta = Column(Integer, nullable=True, comment='Proposal number from APR_CAPA.NUMERO')
+    bordero = Column(String(100), nullable=True, comment='Borderô number if applicable')
+    status_fluxo = Column(String(50), nullable=True, index=True, comment='Workflow status')
+
+    # Financial Details
+    qtd_recebiveis = Column(Integer, nullable=True, comment='Quantity of receivables')
+    valor_total = Column(Numeric(15, 2), nullable=True, comment='Total value')
+
+    # API Response
+    status_envio = Column(
+        Enum('success', 'failed', 'pending', name='status_envio_enum'),
+        nullable=False,
+        default='pending',
+        index=True,
+        comment='Send status'
+    )
+    status_code = Column(Integer, nullable=True, comment='HTTP status code from API response')
+    api_response = Column(JSON, nullable=True, comment='Full API response for debugging')
+    erro_mensagem = Column(Text, nullable=True, comment='Error message if send failed')
+
+    # Configuration
+    config_file = Column(String(255), nullable=True, comment='WhatsApp config file used')
+    api_provider = Column(String(50), default='Z-API', comment='API provider')
+
+    # Tracking & Audit
+    usuario = Column(String(100), nullable=True, comment='User who triggered the message')
+    origem = Column(String(100), default='automated', comment='Message origin')
+    tentativas_envio = Column(Integer, default=1, comment='Number of send attempts')
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_proposta', 'data_proposta', 'numero_proposta'),
+    )
 
 
 class EventoTransporte(Base):
