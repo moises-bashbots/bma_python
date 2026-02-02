@@ -6,6 +6,7 @@ Simple Flask web dashboard for real-time monitoring
 
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session
 from flask.json.provider import DefaultJSONProvider
+from werkzeug.middleware.proxy_fix import ProxyFix
 import pymysql
 import json
 from datetime import datetime, date, timedelta
@@ -31,11 +32,18 @@ app = Flask(__name__)
 app.json = CustomJSONProvider(app)
 app.secret_key = secrets.token_hex(32)  # Generate a secure secret key
 
+# Configure ProxyFix for nginx reverse proxy
+# This ensures Flask correctly handles X-Forwarded-* headers
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+
 # Session configuration
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # 8 hours session timeout
-app.config['SESSION_COOKIE_SECURE'] = False  # Set to True if using HTTPS
+app.config['SESSION_COOKIE_SECURE'] = True  # Require HTTPS for session cookies
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to session cookie
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+
+# Proxy configuration (for nginx reverse proxy)
+app.config['PREFERRED_URL_SCHEME'] = 'https'
 
 # Load database configuration
 def load_db_config():
