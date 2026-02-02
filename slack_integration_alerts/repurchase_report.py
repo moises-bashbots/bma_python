@@ -684,23 +684,28 @@ def filter_by_repurchase_type(data_list: List[RepurchaseData],
     return matches
 
 
-def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
+def query_apr_capa_for_date(target_date: date = None, time_window: str = None) -> List[Dict[str, Any]]:
     """
-    Query APR_CAPA joined with cedente table for records created after 16h15 of previous BUSINESS day.
+    Query APR_CAPA joined with cedente table for records based on time window.
     Also includes product information from APR_TITULOS -> ProdutoCedente -> ProdutoAtributo -> Produto.
 
-    New logic with business days:
-    - If today is a business day: query from 16:15 of previous business day
-    - If today is NOT a business day (weekend/holiday): skip query (no alerts)
+    Query cutoff logic based on time window:
+    - Morning window (08:00-11:59): Query from previous business day 16:15 to today 12:00 (exclusive)
+    - Afternoon window (12:00-16:15): Query from today 12:00 onwards
+
+    This ensures:
+    - Morning alerts only for borderôs created before noon
+    - Afternoon alerts only for borderôs created after noon
+    - No duplicate alerts when time window changes at 12:00
 
     Example scenarios:
-    - Monday: Query from Friday 16:15 onwards
-    - Tuesday-Friday: Query from previous day 16:15 onwards
-    - Saturday/Sunday: Don't query (not a business day)
-    - Holiday: Don't query (not a business day)
+    - Monday morning: Query from Friday 16:15 to Monday 12:00
+    - Monday afternoon: Query from Monday 12:00 onwards
+    - Tuesday-Friday: Similar logic
 
     Args:
         target_date: Date to query (default: today)
+        time_window: Time window ("morning" or "afternoon"). If None, uses current time.
 
     Returns:
         List of dictionaries with APR_CAPA, cedente, and product data, or empty list if not a business day
@@ -708,28 +713,49 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
     if target_date is None:
         target_date = date.today()
 
+    if time_window is None:
+        time_window = get_alert_time_window()
+
     # Check if today is a business day
     if not is_business_day(target_date):
-        print(f"⚠ {target_date} is NOT a business day (weekend or holiday)")
+        print(f"⚠ {target_date} is NOT a business day (weekend/holiday)")
         print(f"⚠ Skipping query - no alerts will be sent")
         print()
         return []
 
-    # Get previous business day
-    previous_business_day = get_previous_business_day(target_date)
+    # Calculate cutoff datetime based on time window
+    if time_window == "morning":
+        # Morning: Query from previous business day 16:15 to today 12:00 (exclusive)
+        previous_business_day = get_previous_business_day(target_date)
 
-    if previous_business_day is None:
-        print(f"⚠ Could not find previous business day from {target_date}")
-        print(f"⚠ Using previous calendar day as fallback")
-        previous_business_day = target_date - timedelta(days=1)
+        if previous_business_day is None:
+            print(f"⚠ Could not find previous business day from {target_date}")
+            print(f"⚠ Using previous calendar day as fallback")
+            previous_business_day = target_date - timedelta(days=1)
 
-    # Calculate the cutoff datetime: previous business day at 16:15:00
-    cutoff_datetime = datetime.combine(previous_business_day, time(16, 15, 0))
+        cutoff_start = datetime.combine(previous_business_day, time(16, 15, 0))
+        cutoff_end = datetime.combine(target_date, time(12, 0, 0))
 
-    print(f"Today: {target_date} (BUSINESS DAY)")
-    print(f"Previous business day: {previous_business_day}")
-    print(f"Querying APR_CAPA for records created after: {cutoff_datetime}")
-    print()
+        print(f"Today: {target_date} (BUSINESS DAY)")
+        print(f"Time window: MORNING (08:00-11:59)")
+        print(f"Previous business day: {previous_business_day}")
+        print(f"Querying APR_CAPA for records: {cutoff_start} <= dataentrada < {cutoff_end}")
+        print()
+
+    elif time_window == "afternoon":
+        # Afternoon: Query from today 12:00 onwards
+        cutoff_start = datetime.combine(target_date, time(12, 0, 0))
+        cutoff_end = None  # No upper limit
+
+        print(f"Today: {target_date} (BUSINESS DAY)")
+        print(f"Time window: AFTERNOON (12:00-16:15)")
+        print(f"Querying APR_CAPA for records: {cutoff_start} <= dataentrada")
+        print()
+
+    else:
+        # After hours or invalid window
+        print(f"⚠ Invalid time window: {time_window}")
+        return []
 
     # Create database session
     engine = create_db_engine()
@@ -739,8 +765,8 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
     try:
         # First, query APR_CAPA joined with cedente
         # APR_CAPA.CEDENTE corresponds to cedente.apelido
-        # Filter: dataentrada >= cutoff_datetime
-        results = session.query(
+        # Filter based on time window
+        query = session.query(
             APRCapa.DATA,
             APRCapa.NUMERO,
             APRCapa.CEDENTE,
@@ -760,10 +786,16 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
             Cedente,
             APRCapa.CEDENTE == Cedente.apelido
         ).filter(
-            APRCapa.dataentrada >= cutoff_datetime
-        ).all()
+            APRCapa.dataentrada >= cutoff_start
+        )
 
-        print(f"✓ Found {len(results)} records in APR_CAPA for {target_date}")
+        # Add upper limit filter for morning window
+        if cutoff_end is not None:
+            query = query.filter(APRCapa.dataentrada < cutoff_end)
+
+        results = query.all()
+
+        print(f"✓ Found {len(results)} records in APR_CAPA for {target_date} ({time_window} window)")
         print()
 
         # Now query products for each borderô using raw SQL (more efficient for aggregation)
@@ -787,26 +819,50 @@ def query_apr_capa_for_date(target_date: date = None) -> List[Dict[str, Any]]:
 
         # Query to get products per borderô
         # Use STUFF + FOR XML PATH to concatenate distinct product names
-        cursor.execute('''
-            SELECT
-                c.NUMERO,
-                STUFF((
-                    SELECT DISTINCT ' | ' + p.Descritivo
-                    FROM APR_TITULOS t2 WITH (NOLOCK)
-                    LEFT JOIN ProdutoCedente pc2 WITH (NOLOCK)
-                        ON t2.id_produto = pc2.Id
-                    LEFT JOIN ProdutoAtributo pa2 WITH (NOLOCK)
-                        ON pc2.IdProdutoAtributo = pa2.Id
-                    LEFT JOIN Produto p WITH (NOLOCK)
-                        ON pa2.IdProduto = p.Id
-                    WHERE t2.NUMERO = c.NUMERO
-                      AND t2.DATA = c.DATA
-                      AND p.Descritivo IS NOT NULL
-                    FOR XML PATH(''), TYPE
-                ).value('.', 'NVARCHAR(MAX)'), 1, 3, '') AS produtos
-            FROM APR_capa c WITH (NOLOCK)
-            WHERE c.dataentrada >= %s
-        ''', (cutoff_datetime,))
+        if cutoff_end is not None:
+            # Morning window: filter with both start and end
+            cursor.execute('''
+                SELECT
+                    c.NUMERO,
+                    STUFF((
+                        SELECT DISTINCT ' | ' + p.Descritivo
+                        FROM APR_TITULOS t2 WITH (NOLOCK)
+                        LEFT JOIN ProdutoCedente pc2 WITH (NOLOCK)
+                            ON t2.id_produto = pc2.Id
+                        LEFT JOIN ProdutoAtributo pa2 WITH (NOLOCK)
+                            ON pc2.IdProdutoAtributo = pa2.Id
+                        LEFT JOIN Produto p WITH (NOLOCK)
+                            ON pa2.IdProduto = p.Id
+                        WHERE t2.NUMERO = c.NUMERO
+                          AND t2.DATA = c.DATA
+                          AND p.Descritivo IS NOT NULL
+                        FOR XML PATH(''), TYPE
+                    ).value('.', 'NVARCHAR(MAX)'), 1, 3, '') AS produtos
+                FROM APR_capa c WITH (NOLOCK)
+                WHERE c.dataentrada >= %s AND c.dataentrada < %s
+            ''', (cutoff_start, cutoff_end))
+        else:
+            # Afternoon window: filter with only start
+            cursor.execute('''
+                SELECT
+                    c.NUMERO,
+                    STUFF((
+                        SELECT DISTINCT ' | ' + p.Descritivo
+                        FROM APR_TITULOS t2 WITH (NOLOCK)
+                        LEFT JOIN ProdutoCedente pc2 WITH (NOLOCK)
+                            ON t2.id_produto = pc2.Id
+                        LEFT JOIN ProdutoAtributo pa2 WITH (NOLOCK)
+                            ON pc2.IdProdutoAtributo = pa2.Id
+                        LEFT JOIN Produto p WITH (NOLOCK)
+                            ON pa2.IdProduto = p.Id
+                        WHERE t2.NUMERO = c.NUMERO
+                          AND t2.DATA = c.DATA
+                          AND p.Descritivo IS NOT NULL
+                        FOR XML PATH(''), TYPE
+                    ).value('.', 'NVARCHAR(MAX)'), 1, 3, '') AS produtos
+                FROM APR_capa c WITH (NOLOCK)
+                WHERE c.dataentrada >= %s
+            ''', (cutoff_start,))
 
         produtos_por_bordero = {}
         for row in cursor.fetchall():
@@ -998,23 +1054,29 @@ def cleanup_old_alerts(sent_alerts: Dict[str, List[str]], days_to_keep: int = 7)
     return cleaned
 
 
-def get_alert_time_window() -> str:
+def get_alert_time_window(dt: datetime = None) -> str:
     """
-    Get the current alert time window based on current time.
+    Get the alert time window based on a datetime.
 
     Windows:
     - "morning": 08:00 - 11:59 (send once)
     - "afternoon": 12:00 - 16:15 (send once)
     - "after_hours": 16:15+ (don't send, wait for next day)
 
+    Args:
+        dt: Datetime to check. If None, uses current time.
+
     Returns:
         Time window identifier: "morning", "afternoon", or "after_hours"
     """
-    now = datetime.now().time()
+    if dt is None:
+        dt = datetime.now()
 
-    if time(8, 0) <= now < time(12, 0):
+    t = dt.time()
+
+    if time(8, 0) <= t < time(12, 0):
         return "morning"
-    elif time(12, 0) <= now < time(16, 15):
+    elif time(12, 0) <= t < time(16, 15):
         return "afternoon"
     else:
         return "after_hours"
@@ -1024,11 +1086,13 @@ def create_alert_id(cedente: str, numero: int = None, time_window: str = None) -
     """
     Create a unique alert ID for duplicity control with time window.
 
-    New format includes time window to allow one alert before 12h and one after 12h.
-
     IMPORTANT: Alert ID is based on CEDENTE + TIME_WINDOW only (not borderô number).
-    This ensures maximum 2 alerts per cedente per day (one morning, one afternoon),
-    regardless of how many borderôs the cedente has.
+
+    This allows:
+    - Maximum 2 alerts per cedente per day (one in morning, one in afternoon)
+    - Morning window (08:00-11:59): Alert for borderôs created in morning
+    - Afternoon window (12:00-16:15): Alert for borderôs created in afternoon
+    - Only ONE alert per cedente per time window (even if multiple borderôs)
 
     Args:
         cedente: Client name (apelido)
@@ -1045,7 +1109,7 @@ def create_alert_id(cedente: str, numero: int = None, time_window: str = None) -
     normalized_cedente = cedente.replace(' ', '_').upper()
 
     # Alert ID is based on CEDENTE + TIME_WINDOW only (not borderô number)
-    # This ensures max 2 alerts per cedente per day
+    # This ensures max 1 alert per cedente per time window
     return f"{normalized_cedente}_{time_window}"
 
 
@@ -1054,7 +1118,7 @@ def is_alert_already_sent(alert_id: str, target_date: date, sent_alerts: Dict[st
     Check if an alert was already sent for this time window today.
 
     Args:
-        alert_id: Unique alert ID (includes time window)
+        alert_id: Unique alert ID (includes time window, e.g., "METALURGICA_REUTER_afternoon")
         target_date: Date to check
         sent_alerts: Dictionary of sent alerts
 
@@ -1107,12 +1171,15 @@ def send_repurchase_alerts(matched_records: List[Dict[str, Any]],
     For each matched record, sends a message to the operacionalxcobranca channel
     mentioning the operator.
 
-    New rules:
+    Alert Rules:
     - Only send alerts on BUSINESS DAYS (not weekends or holidays)
     - Only send alerts between 08:00 and 16:15
-    - Send once in morning window (08:00-11:59)
-    - Send once in afternoon window (12:00-16:15)
-    - Records created after 16:15 will be sent next business day
+    - Maximum 2 alerts per cedente per day (one in morning, one in afternoon)
+    - Morning window (08:00-11:59): Only alert for borderôs created in morning
+    - Afternoon window (12:00-16:15): Only alert for borderôs created in afternoon
+    - Only ONE alert per cedente per time window (even if multiple borderôs)
+    - Borderôs created after 16:15 will be alerted next business day morning
+    - Borderôs created before 08:00 will be alerted in morning window
 
     Message format: @{operator} {cedente_apelido}
 
@@ -1280,6 +1347,8 @@ def send_repurchase_alerts(matched_records: List[Dict[str, Any]],
                 continue
 
             # Create unique alert ID for duplicity control (includes time window)
+            # Note: The query already filtered borderôs by time window, so all records here
+            # were created in the current time window
             alert_id = create_alert_id(cedente_apelido, numero, time_window)
 
             # Check if alert was already sent in this time window today
@@ -1436,13 +1505,16 @@ def main():
         print("=" * 120)
         print()
 
-        # Query APR_CAPA for current date
+        # Get current time window
+        time_window = get_alert_time_window()
+
+        # Query APR_CAPA for current date with time window filter
         print("=" * 120)
         print("QUERYING APR_CAPA DATABASE")
         print("=" * 120)
         print()
 
-        apr_data = query_apr_capa_for_date()
+        apr_data = query_apr_capa_for_date(time_window=time_window)
 
         if apr_data:
             print(f"Sample APR_CAPA records (first 5):")

@@ -31,6 +31,8 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models_mariadb import MariaDBBase, APRValidRecord
+from models import APRCapa, Cedente as MSSQLCedente
+from monitoring_helpers import track_all_status_changes_from_source
 
 
 # Configuration
@@ -161,7 +163,7 @@ def read_proposals_table(page, save_html=False):
 
     Returns:
         Tuple of (headers, proposals_data)
-        - headers: List of column names
+        - headers: List of column names (empty list for performance)
         - proposals_data: List of lists with proposal data
     """
     print("\nReading proposals table...")
@@ -176,40 +178,41 @@ def read_proposals_table(page, save_html=False):
             f.write(html_content)
         print("✓ Saved page HTML to proposta_page.html")
 
-    # Get table headers
-    header_cells = page.query_selector_all("table thead tr th")
-    if not header_cells:
-        # Try alternative header structure
-        header_cells = page.query_selector_all("table tr:first-child th")
-    if not header_cells:
-        # Try if first row has td instead of th
-        header_cells = page.query_selector_all("table tr:first-child td")
+    # OPTIMIZATION: Skip reading headers entirely - we don't use them
+    # This saves processing 2269 header cells
+    headers = []
+    print(f"✓ Skipped reading headers for performance (not needed)")
 
-    # Use text_content() instead of inner_text() - it's much faster
-    # text_content() doesn't wait for layout/visibility, just gets the text
-    headers = [cell.text_content().strip() for cell in header_cells]
-    print(f"✓ Table has {len(headers)} header columns (not printing to avoid crash)")
+    # OPTIMIZATION: Use CSS selector to directly get only DXDataRow rows
+    # This is much faster than querying all rows and filtering
+    data_rows = page.query_selector_all('table tbody tr[id*="DXDataRow"]')
+    print(f"✓ Found {len(data_rows)} data rows using optimized selector")
 
-    # Get only actual data rows (those with DXDataRow IDs) from the table
-    # DevExpress tables have many header rows, we only want the actual data rows
-    all_rows = page.query_selector_all("table tbody tr")
+    # OPTIMIZATION: Use JavaScript to extract all data at once
+    # This is MUCH faster than Python loops with individual text_content() calls
+    proposals = page.evaluate("""
+        () => {
+            const rows = document.querySelectorAll('table tbody tr[id*="DXDataRow"]');
+            const data = [];
 
-    # Filter to only rows that have an id attribute containing "DXDataRow"
-    data_rows = []
-    for row in all_rows:
-        row_id = row.get_attribute("id")
-        if row_id and "DXDataRow" in row_id:
-            data_rows.append(row)
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                const rowData = [];
 
-    proposals = []
-    for row in data_rows:
-        cells = row.query_selector_all("td")
-        if len(cells) > 0:
-            # Use text_content() instead of inner_text() for much faster extraction
-            row_data = [cell.text_content().strip() for cell in cells]
-            proposals.append(row_data)
+                cells.forEach(cell => {
+                    rowData.push(cell.textContent.trim());
+                });
 
-    print(f"✓ Found {len(proposals)} proposals in table (filtered from {len(all_rows)} total rows)")
+                if (rowData.length > 0) {
+                    data.push(rowData);
+                }
+            });
+
+            return data;
+        }
+    """)
+
+    print(f"✓ Extracted {len(proposals)} proposals using JavaScript (much faster)")
 
     # Print first 3 rows as sample
     if len(proposals) > 0:
@@ -840,6 +843,42 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                 print(f"\n{'='*80}")
                 print(f"✓ Finished processing all {len(db_records)} proposals!")
                 print(f"{'='*80}")
+
+                # Track status changes after bot processing
+                if not dry_run and session and len(db_records) > 0:
+                    print(f"\n{'='*80}")
+                    print("TRACKING STATUS CHANGES AFTER BOT PROCESSING")
+                    print(f"{'='*80}")
+
+                    try:
+                        # Create MSSQL session to query current status
+                        config = load_config()
+                        mssql_config = config['databases']['mssql']
+                        mssql_connection_string = (
+                            f"mssql+pyodbc://{mssql_config['user']}:{mssql_config['password']}"
+                            f"@{mssql_config['server']}/{mssql_config['scheme']}"
+                            f"?driver=ODBC+Driver+17+for+SQL+Server"
+                        )
+                        mssql_engine = create_engine(mssql_connection_string)
+                        MSSQLSession = sessionmaker(bind=mssql_engine)
+                        mssql_session = MSSQLSession()
+
+                        # Track status changes with BOT source
+                        status_changes = track_all_status_changes_from_source(
+                            mssql_session=mssql_session,
+                            mariadb_session=session,
+                            target_date=target_date,
+                            change_source='BOT'
+                        )
+                        print(f"✓ Tracked {status_changes} status changes after bot processing")
+
+                        # Close MSSQL session
+                        mssql_session.close()
+
+                    except Exception as e:
+                        print(f"⚠️  Warning: Could not track status changes: {e}")
+                        import traceback
+                        traceback.print_exc()
             else:
                 print(f"\n⚠ No records to process for today")
 

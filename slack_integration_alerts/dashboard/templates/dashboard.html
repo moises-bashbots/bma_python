@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoramento de Propostas APR - BMA</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f7fa;
+            color: #1a202c;
+            padding: 0;
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        .header-section {
+            background: linear-gradient(135deg, #0a1628 0%, #1a2942 100%);
+            padding: 20px 20px 30px 20px;
+            margin-bottom: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .content-section {
+            padding: 0 20px 20px 20px;
+        }
+        
+        header {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            padding: 20px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            height: 60px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+
+        .header-content {
+            flex: 1;
+        }
+
+        h1 {
+            color: #ffffff;
+            font-size: 28px;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .subtitle {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+        }
+
+        .last-update {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+            text-align: right;
+        }
+
+        .countdown {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 11px;
+            margin-top: 4px;
+            font-weight: 500;
+        }
+
+        .countdown-number {
+            color: #4169E1;
+            font-weight: 600;
+        }
+
+        .logout-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 8px;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            border-top: 3px solid #e2e8f0;
+        }
+
+        .metric-value {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .metric-label {
+            color: #64748b;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .metric-card.total { border-top-color: #4169E1; }
+        .metric-card.total .metric-value { color: #4169E1; }
+
+        .metric-card.valid { border-top-color: #10b981; }
+        .metric-card.valid .metric-value { color: #059669; }
+
+        .metric-card.invalid { border-top-color: #ef4444; }
+        .metric-card.invalid .metric-value { color: #dc2626; }
+
+        .metric-card.value { border-top-color: #f59e0b; }
+        .metric-card.value .metric-value { color: #d97706; font-size: 28px; }
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        .table-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #f8fafc;
+            padding: 14px 12px;
+            text-align: left;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #475569;
+            font-weight: 700;
+            border-bottom: 2px solid #cbd5e1;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 14px 12px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 14px;
+            color: #1e293b;
+        }
+
+        tr:hover {
+            background: #f8fafc;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Expandable row styles */
+        .expand-btn {
+            cursor: pointer;
+            background: none;
+            border: none;
+            color: #4169E1;
+            font-size: 16px;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .expand-btn:hover {
+            background: #dbeafe;
+        }
+
+        .expand-btn.expanded {
+            transform: rotate(90deg);
+        }
+
+        .details-row {
+            display: none;
+            background: #f8fafc !important;
+        }
+
+        .details-row.show {
+            display: table-row;
+        }
+
+        .details-cell {
+            padding: 20px !important;
+            border-left: 3px solid #ef4444;
+        }
+
+        .details-content {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .details-content h4 {
+            color: #dc2626;
+            font-size: 14px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .details-content p {
+            color: #475569;
+            font-size: 13px;
+            margin: 5px 0;
+        }
+
+        .details-content strong {
+            color: #1e293b;
+        }
+
+        /* Status badges for is_processado */
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-badge.processed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-badge.not-processed {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .status-badge.bot-processed {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        .badge.system {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        .badge.bot {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .badge.auto {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .table-card h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: #1e293b;
+            font-weight: 700;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+        }
+
+        table {
+            font-size: 13px;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: #f8fafc !important;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-section">
+        <div class="container">
+            <header>
+                <img src="https://bmafidc.com.br/wp-content/uploads/2024/03/logo-bma-fidc.svg" alt="BMA FIDC Logo" class="logo">
+                <div class="header-content">
+                    <h1>📊 Monitoramento de Propostas APR</h1>
+                    <div class="subtitle">Painel de monitoramento em tempo real</div>
+                </div>
+                <div>
+                    <div class="last-update" id="lastUpdate">Carregando...</div>
+                    <div class="countdown" id="countdown">Próxima atualização em <span class="countdown-number">30</span>s</div>
+                    <a href="/logout" class="logout-btn">🚪 Sair</a>
+                </div>
+            </header>
+        </div>
+    </div>
+
+    <div class="content-section">
+        <div class="container">
+            <div class="metrics-grid">
+            <div class="metric-card total">
+                <div class="metric-label">Total de Propostas</div>
+                <div class="metric-value" id="totalProposals">-</div>
+            </div>
+            <div class="metric-card valid">
+                <div class="metric-label">Válidas</div>
+                <div class="metric-value" id="validProposals">-</div>
+            </div>
+            <div class="metric-card invalid">
+                <div class="metric-label">Inválidas</div>
+                <div class="metric-value" id="invalidProposals">-</div>
+            </div>
+            <div class="metric-card value">
+                <div class="metric-label">Valor Total</div>
+                <div class="metric-value" id="totalValue">-</div>
+            </div>
+        </div>
+
+        <div class="table-card">
+            <h2>Todas as Propostas de Hoje</h2>
+            <div id="allProposalsTable" class="loading">Carregando...</div>
+        </div>
+
+        <div class="table-card">
+            <h2>Mudanças de Status Recentes (Últimas 2 Horas)</h2>
+            <div id="statusChangesTable" class="loading">Carregando...</div>
+        </div>
+        </div>
+    </div>
+
+    <script>
+        // Auto-refresh every 30 seconds
+        const REFRESH_INTERVAL = 30000;
+        let countdownSeconds = 30;
+        let countdownInterval;
+
+        // Update countdown timer
+        function updateCountdown() {
+            countdownSeconds--;
+            if (countdownSeconds <= 0) {
+                countdownSeconds = 30;
+            }
+            const countdownEl = document.getElementById('countdown');
+            if (countdownEl) {
+                countdownEl.innerHTML = `Próxima atualização em <span class="countdown-number">${countdownSeconds}</span>s`;
+            }
+        }
+
+        // Start countdown
+        function startCountdown() {
+            countdownSeconds = 30;
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+            }
+            countdownInterval = setInterval(updateCountdown, 1000);
+        }
+
+        // Update last update time
+        function updateLastUpdateTime() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent =
+                'Última atualização: ' + now.toLocaleTimeString('pt-BR', {
+                    timeZone: 'America/Sao_Paulo'
+                });
+        }
+
+        // Format currency
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('pt-BR', {
+                style: 'currency',
+                currency: 'BRL'
+            }).format(value);
+        }
+
+        // Format datetime
+        function formatDateTime(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleString('pt-BR', {
+                timeZone: 'America/Sao_Paulo'
+            });
+        }
+
+        // Load summary metrics
+        async function loadSummary() {
+            try {
+                const response = await fetch('/api/summary');
+                const data = await response.json();
+
+                document.getElementById('totalProposals').textContent = data.total_proposals;
+                document.getElementById('validProposals').textContent = data.valid_proposals;
+                document.getElementById('invalidProposals').textContent = data.invalid_proposals;
+                document.getElementById('totalValue').textContent = formatCurrency(data.total_value);
+
+                updateLastUpdateTime();
+            } catch (error) {
+                console.error('Error loading summary:', error);
+            }
+        }
+
+        // Load status changes
+        async function loadStatusChanges() {
+            try {
+                const response = await fetch('/api/status_changes');
+                const data = await response.json();
+
+                let html = '<table><thead><tr>';
+                html += '<th>Horário</th><th>Proposta</th><th>Cliente</th>';
+                html += '<th>Status Anterior</th><th>Novo Status</th><th>Origem</th>';
+                html += '</tr></thead><tbody>';
+
+                data.forEach(row => {
+                    const sourceClass = row.CHANGE_SOURCE.toLowerCase();
+                    html += '<tr>';
+                    html += `<td>${formatDateTime(row.changed_at)}</td>`;
+                    html += `<td><strong>${row.PROPOSTA}</strong></td>`;
+                    html += `<td>${row.CEDENTE || '-'}</td>`;
+                    html += `<td>${row.OLD_STATUS || '-'}</td>`;
+                    html += `<td>${row.NEW_STATUS || '-'}</td>`;
+                    html += `<td><span class="badge ${sourceClass}">${row.CHANGE_SOURCE}</span></td>`;
+                    html += '</tr>';
+                });
+
+                html += '</tbody></table>';
+                document.getElementById('statusChangesTable').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading status changes:', error);
+            }
+        }
+
+        // Format time only (HH:MM:SS) for today's records
+        // Database stores times in Brazil local time, so we extract the time directly
+        function formatTime(timestamp) {
+            if (!timestamp) return '-';
+
+            // Convert to string in case it's not
+            const timestampStr = String(timestamp);
+
+            // Handle both ISO format (2026-02-02T16:20:07) and space format (2026-02-02 16:20:07)
+            let timePart;
+            if (timestampStr.includes('T')) {
+                timePart = timestampStr.split('T')[1];
+            } else if (timestampStr.includes(' ')) {
+                timePart = timestampStr.split(' ')[1];
+            }
+
+            if (timePart) {
+                return timePart.substring(0, 8); // HH:MM:SS
+            }
+            return '-';
+        }
+
+        // Toggle details row
+        function toggleDetails(proposalId) {
+            const detailsRow = document.getElementById(`details-${proposalId}`);
+            const expandBtn = document.getElementById(`expand-${proposalId}`);
+
+            if (detailsRow.classList.contains('show')) {
+                detailsRow.classList.remove('show');
+                expandBtn.classList.remove('expanded');
+            } else {
+                detailsRow.classList.add('show');
+                expandBtn.classList.add('expanded');
+            }
+        }
+
+        // Load all proposals
+        async function loadAllProposals() {
+            try {
+                const response = await fetch('/api/all_proposals');
+                const data = await response.json();
+
+                let html = '<table><thead><tr>';
+                html += '<th style="width: 30px;"></th>'; // Expand button column
+                html += '<th>Proposta</th><th>Cliente</th><th>Ramo</th><th>Gerente</th>';
+                html += '<th>Status</th><th>Valor Aprovado</th><th>Qtd Títulos</th><th>Produtos</th><th>Primeira Vez</th><th>Última Atualização</th>';
+                html += '<th>Processado</th><th>Validação</th><th>Tipos de Erro</th>';
+                html += '</tr></thead><tbody>';
+
+                // Sort by proposal number in descending order
+                data.sort((a, b) => b.PROPOSTA - a.PROPOSTA);
+
+                data.forEach(row => {
+                    const isValid = row.VALIDATION_STATUS === 'VALID';
+                    const rowClass = isValid ? '' : 'style="background-color: #fef2f2;"';
+                    const proposalId = `${row.PROPOSTA}-${row.CEDENTE}`.replace(/[^a-zA-Z0-9]/g, '-');
+
+                    // Main row
+                    html += `<tr ${rowClass}>`;
+
+                    // Expand button (only for invalid records)
+                    if (!isValid) {
+                        html += `<td><button class="expand-btn" id="expand-${proposalId}" onclick="toggleDetails('${proposalId}')">▶</button></td>`;
+                    } else {
+                        html += '<td></td>';
+                    }
+
+                    html += `<td><strong style="color: #1e293b;">${row.PROPOSTA}</strong></td>`;
+                    html += `<td style="color: #334155;">${row.CEDENTE || '-'}</td>`;
+                    html += `<td style="color: #475569;">${row.RAMO || '-'}</td>`;
+                    html += `<td style="color: #475569;">${row.GERENTE || '-'}</td>`;
+                    html += `<td style="color: #475569;">${row.STATUS || '-'}</td>`;
+                    html += `<td style="color: #1e293b; font-weight: 600;">${formatCurrency(row.VLR_APROVADOS)}</td>`;
+                    html += `<td style="color: #475569; text-align: center;">${row.QTD_TITULOS || 0}</td>`;
+
+                    // Products column
+                    html += `<td style="color: #475569; font-size: 11px;">${row.PRODUTOS || '-'}</td>`;
+
+                    html += `<td style="color: #64748b; font-size: 12px;">${formatTime(row.first_seen)}</td>`;
+                    html += `<td style="color: #64748b; font-size: 12px;">${formatTime(row.last_updated)}</td>`;
+
+                    // Processed status
+                    if (row.is_bot_processed === 1) {
+                        html += '<td><span class="status-badge bot-processed">BOT</span></td>';
+                    } else if (row.is_processado === 1) {
+                        html += '<td><span class="status-badge processed">SIM</span></td>';
+                    } else {
+                        html += '<td><span class="status-badge not-processed">NÃO</span></td>';
+                    }
+
+                    // Validation status
+                    if (isValid) {
+                        html += '<td><span class="badge" style="background: #d1fae5; color: #065f46;">VÁLIDA</span></td>';
+                    } else {
+                        html += `<td><span class="badge" style="background: #fee2e2; color: #991b1b;">INVÁLIDA</span></td>`;
+                    }
+
+                    // Error Types column (only for invalid proposals)
+                    if (!isValid) {
+                        html += `<td style="color: #991b1b; font-size: 11px; font-weight: 600;">${row.VALIDATION_TYPE || '-'}</td>`;
+                    } else {
+                        html += '<td style="color: #64748b;">-</td>';
+                    }
+
+                    html += '</tr>';
+
+                    // Details row (only for invalid records)
+                    if (!isValid) {
+                        html += `<tr class="details-row" id="details-${proposalId}">`;
+                        html += '<td colspan="14" class="details-cell">';
+                        html += '<div class="details-content">';
+                        html += `<h4>❌ Detalhes do Erro de Validação</h4>`;
+                        html += `<p><strong>Tipo:</strong> ${row.VALIDATION_TYPE}</p>`;
+                        html += `<p><strong>Motivo:</strong> ${row.MOTIVO || 'Nenhum detalhe disponível'}</p>`;
+                        html += `<p><strong>Empresa:</strong> ${row.EMPRESA || '-'}</p>`;
+                        html += `<p><strong>Detectado:</strong> ${formatTime(row.first_seen)}</p>`;
+                        html += '</div>';
+                        html += '</td>';
+                        html += '</tr>';
+                    }
+                });
+
+                html += '</tbody></table>';
+                document.getElementById('allProposalsTable').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading all proposals:', error);
+            }
+        }
+
+        // Load all data
+        function loadAllData() {
+            loadSummary();
+            loadAllProposals();
+            loadStatusChanges();
+            startCountdown(); // Reset countdown after each refresh
+        }
+
+        // Initial load
+        loadAllData();
+        startCountdown(); // Start countdown timer
+
+        // Auto-refresh
+        setInterval(loadAllData, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>

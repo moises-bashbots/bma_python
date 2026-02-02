@@ -34,6 +34,18 @@ from openpyxl.utils import get_column_letter
 import requests
 import pymysql
 
+# Import monitoring helpers
+from monitoring_helpers import (
+    log_invalid_records,
+    auto_resolve_invalid_records,
+    track_all_status_changes_from_source,
+    track_proposal_products,
+    log_program_execution,
+    update_daily_summary,
+    cleanup_old_monitoring_data
+)
+from models_mariadb import MariaDBBase
+
 
 def get_most_recent_weekday(target_date=None):
     """
@@ -128,6 +140,29 @@ def create_mariadb_connection(config):
     )
 
     return connection
+
+
+def create_mariadb_session(config):
+    """
+    Create SQLAlchemy session for MariaDB (for monitoring functions).
+
+    Args:
+        config: Database configuration dictionary
+
+    Returns:
+        SQLAlchemy session object
+    """
+    db_config = config['databases']['mariadb']
+
+    connection_string = (
+        f"mysql+pymysql://{db_config['user']}:{db_config['password']}"
+        f"@{db_config['server']}:{db_config['port']}/{db_config['scheme']}"
+        f"?charset=utf8mb4"
+    )
+
+    engine = create_engine(connection_string, echo=False)
+    Session = sessionmaker(bind=engine)
+    return Session()
 
 
 def store_valid_records_to_mariadb(valid_records, mariadb_conn, dry_run=True):
@@ -240,6 +275,43 @@ def store_valid_records_to_mariadb(valid_records, mariadb_conn, dry_run=True):
         mariadb_conn.commit()
 
     return insert_count, update_count
+
+
+# ============================================================================
+# NFECHAVE VALIDATION FUNCTIONS
+# ============================================================================
+
+def validate_nfechave(nfechave: str) -> bool:
+    """
+    Validate if NFEChave field is not empty, null, or whitespace-only.
+
+    Args:
+        nfechave: The NFEChave field value
+
+    Returns:
+        True if valid (not empty), False otherwise
+    """
+    if not nfechave:
+        return False
+
+    # Check if it's only whitespace
+    if not nfechave.strip():
+        return False
+
+    return True
+
+
+def get_invalid_nfechave_reason(produto: str) -> str:
+    """
+    Get the reason why NFEChave is invalid (in Brazilian Portuguese).
+
+    Args:
+        produto: The PRODUTO name
+
+    Returns:
+        String describing the error reason in Portuguese
+    """
+    return f"{produto} sem chave de NF"
 
 
 # ============================================================================
@@ -357,6 +429,139 @@ def get_invalid_duplicata_reason_simple(duplicata: str) -> str:
         return "Falta número sequencial após o separador"
 
     return "Formato inválido - esperado: separador (- ou /) + número sequencial"
+
+
+def validate_cheque_proposals(session, validated_results, target_date):
+    """
+    Validate proposals that contain ONLY CHEQUE products.
+
+    Rules:
+    - If a proposal has ONLY CHEQUE products
+    - Count total number of titles (QTD_TITULOS)
+    - If > 100 titles: INVALID (send alert)
+    - If <= 100 titles: VALID
+
+    Args:
+        session: SQLAlchemy session for MSSQL
+        validated_results: List of validated records
+        target_date: Date being processed
+
+    Returns:
+        Tuple of (invalid_cheque_records, updated_validated_results)
+    """
+    from sqlalchemy import func
+    from collections import defaultdict
+
+    print("\n" + "=" * 140)
+    print("VALIDATING CHEQUE-ONLY PROPOSALS")
+    print("=" * 140)
+
+    # Group records by proposal to check if they have ONLY CHEQUE
+    proposal_products = defaultdict(set)
+    proposal_info = {}  # Store proposal metadata
+
+    for record in validated_results:
+        key = (record['DATA'], record['PROPOSTA'], record['CEDENTE'])
+        produto = (record.get('PRODUTO') or '').upper()
+        proposal_products[key].add(produto)
+
+        if key not in proposal_info:
+            proposal_info[key] = {
+                'GERENTE': record.get('GERENTE'),
+                'DATA': record['DATA'],
+                'PROPOSTA': record['PROPOSTA'],
+                'CEDENTE': record['CEDENTE'],
+                'EMPRESA': record.get('EMPRESA'),
+                'STATUS': record.get('STATUS'),
+                'RAMO': record.get('RAMO'),
+            }
+
+    # Find proposals with ONLY CHEQUE
+    cheque_only_proposals = []
+    for key, products in proposal_products.items():
+        if products == {'CHEQUE'}:
+            cheque_only_proposals.append(key)
+
+    print(f"Found {len(cheque_only_proposals)} proposals with ONLY CHEQUE products")
+
+    if not cheque_only_proposals:
+        print("✓ No CHEQUE-only proposals to validate")
+        return [], validated_results
+
+    # Query to count titles for each CHEQUE-only proposal
+    invalid_cheque_records = []
+
+    for data, proposta, cedente in cheque_only_proposals:
+        # Count titles for this proposal
+        count_query = session.query(
+            func.count(APRTitulos.TITULO).label('QTD_TITULOS')
+        ).join(
+            APRCapa,
+            and_(
+                APRTitulos.DATA == APRCapa.DATA,
+                APRTitulos.NUMERO == APRCapa.NUMERO
+            )
+        ).filter(
+            cast(APRCapa.DATA, Date) == data,
+            APRCapa.NUMERO == proposta,
+            APRCapa.CEDENTE == cedente
+        )
+
+        result = count_query.first()
+        qtd_titulos = result.QTD_TITULOS if result else 0
+
+        # Check if exceeds limit
+        if qtd_titulos > 100:
+            info = proposal_info[(data, proposta, cedente)]
+            invalid_cheque_records.append({
+                'GERENTE': info['GERENTE'],
+                'PROPOSTA': proposta,
+                'DATA': data,
+                'CEDENTE': cedente,
+                'EMPRESA': info['EMPRESA'],
+                'STATUS': info['STATUS'],
+                'RAMO': info['RAMO'],
+                'PRODUTO': 'CHEQUE',
+                'QTD_TITULOS': qtd_titulos,
+                'MOTIVO_INVALIDO': f'Proposta CHEQUE com {qtd_titulos} títulos (limite: 100)',
+                'NFECHAVE_VALID': True,  # CHEQUE doesn't need NFEChave
+                'DUPLICATA_VALID': True,  # CHEQUE doesn't need DUPLICATA
+                'SEUNO_VALID': True,      # CHEQUE doesn't need SEUNO
+                'IS_VALID': False,        # But it's invalid due to quantity
+                'SEUNO': None,
+                'DUPLICATA': None,
+                'NFE': None,
+            })
+            print(f"  ⚠️  INVALID: {cedente} - Proposta {proposta} - {qtd_titulos} títulos (> 100)")
+        else:
+            print(f"  ✓ VALID: {cedente} - Proposta {proposta} - {qtd_titulos} títulos (<= 100)")
+
+    # Mark CHEQUE-only proposals as valid in validated_results if they pass the check
+    # (they were already validated, we just need to mark the invalid ones)
+    updated_results = []
+    for record in validated_results:
+        key = (record['DATA'], record['PROPOSTA'], record['CEDENTE'])
+
+        # If this is a CHEQUE-only proposal that's invalid, mark it
+        if key in cheque_only_proposals:
+            # Check if it's in the invalid list
+            is_invalid_cheque = any(
+                inv['DATA'] == record['DATA'] and
+                inv['PROPOSTA'] == record['PROPOSTA'] and
+                inv['CEDENTE'] == record['CEDENTE']
+                for inv in invalid_cheque_records
+            )
+
+            if is_invalid_cheque:
+                # Skip this record from validated_results (it's now invalid)
+                continue
+
+        updated_results.append(record)
+
+    print(f"\n✓ CHEQUE validation complete: {len(invalid_cheque_records)} invalid proposals found")
+    print("=" * 140)
+
+    return invalid_cheque_records, updated_results
 
 
 # ============================================================================
@@ -754,9 +959,8 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
     results_with_nfe = query_with_nfe.all()
     print(f"Found {len(results_with_nfe)} records with NFEChave")
 
-    # Query 2b: Records WITHOUT NFEChave but with specific product types
-    # These products don't require NFE validation, only DUPLICATA format (separator + sequential)
-    specific_products = [
+    # Products that don't need NFEChave validation (case-insensitive)
+    products_no_nfechave_validation = [
         'CTE BMA FIDC',
         'CTE PRE-IMPRESSO BMA FIDC',
         'INTERCIA NFSE',
@@ -768,6 +972,46 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         'RENEGOCIAÇÃO',
         'NOTA COMERCIAL',
         'MEIA NOTA',
+        'NF SERV. PRE-IMPR. BMA FIDC',
+        'NF SERV. BMA FIDC',
+        'CCB',
+        'CONVENCIONAL BMA FIDC',
+        'CHEQUE',
+    ]
+    # Convert to uppercase for case-insensitive comparison
+    products_no_nfechave_validation = [p.upper() for p in products_no_nfechave_validation]
+
+    # Products that don't need ANY DUPLICATA validation (case-insensitive)
+    products_no_duplicata_validation = [
+        'CTE BMA FIDC',
+        'CTE PRE-IMPRESSO BMA FIDC',
+        'CONTRATO',
+        'COB SIMPLES NÃO PG 3ºS',
+        'SEM NOTA',
+        'COB SIMPLES GARANTIA',
+        'RENEGOCIAÇÃO',
+        'NOTA COMERCIAL',
+        'MEIA NOTA',
+        'COBRANÇA SIMPLES',
+    ]
+    # Convert to uppercase for case-insensitive comparison
+    products_no_duplicata_validation = [p.upper() for p in products_no_duplicata_validation]
+
+    # Products that don't need SEUNO validation (case-insensitive)
+    products_no_seuno_validation = [
+        'COMISSÁRIA',
+        'ESCROW DEPÓSITO',
+        'CHEQUE',
+    ]
+    # Convert to uppercase for case-insensitive comparison
+    products_no_seuno_validation = [p.upper() for p in products_no_seuno_validation]
+
+    # Query 2b: Records WITHOUT NFEChave but with specific product types
+    # These products don't require NFE validation, only DUPLICATA format (separator + sequential)
+    specific_products = [
+        'INTERCIA NFSE',
+        'NF SERV. BMA SEC.',
+        'CAPITAL DE GIRO NP',
         'NF SERV. PRE-IMPR. BMA FIDC',
         'NF SERV. BMA FIDC',
         'CCB',
@@ -852,49 +1096,78 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
             except (ValueError, IndexError):
                 nfe = None
 
-        # Validate DUPLICATA
-        # If NFE exists, use full validation; otherwise use simple validation (separator + sequential only)
-        if nfe:
-            duplicata_valid = validate_duplicata_format(duplicata, nfe)
-            duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason(duplicata, nfe)
-        else:
-            # No NFE - use simple validation (only check separator + sequential)
-            duplicata_valid = validate_duplicata_format_simple(duplicata)
-            duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason_simple(duplicata)
+        # Validate NFEChave FIRST (before DUPLICATA and SEUNO)
+        # Skip validation for products that don't require it (case-insensitive)
+        produto_upper = produto.upper() if produto else ""
+        nfechave_valid = True
+        nfechave_motivo = ""
 
-        # Validate SEUNO (only for cedentes with pre-impresso)
+        if produto_upper not in products_no_nfechave_validation:
+            # This product requires NFEChave validation
+            nfechave_valid = validate_nfechave(nfe_chave)
+            if not nfechave_valid:
+                nfechave_motivo = get_invalid_nfechave_reason(produto or "PRODUTO")
+
+        # Validate DUPLICATA (only if NFEChave is valid)
+        # Skip validation for products that don't require it (case-insensitive)
+        duplicata_valid = True
+        duplicata_motivo = ""
+
+        if nfechave_valid:  # Only validate DUPLICATA if NFEChave is valid
+            if produto_upper in products_no_duplicata_validation:
+                # No DUPLICATA validation needed for these products
+                duplicata_valid = True
+                duplicata_motivo = ""
+            elif nfe:
+                # NFE exists - use full validation
+                duplicata_valid = validate_duplicata_format(duplicata, nfe)
+                duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason(duplicata, nfe)
+            else:
+                # No NFE - use simple validation (only check separator + sequential)
+                duplicata_valid = validate_duplicata_format_simple(duplicata)
+                duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason_simple(duplicata)
+
+        # Validate SEUNO (only if NFEChave is valid and for cedentes with pre-impresso)
+        # Skip validation for products that don't require it (case-insensitive)
         seuno_valid = True
         seuno_motivo = ""
         seuno_range = ""
         seuno_company = ""
         verification_digit = ""
 
-        if cedente in cedente_ranges:
-            # This cedente has pre-impresso ranges
-            ranges_list = cedente_ranges[cedente]
+        if nfechave_valid:  # Only validate SEUNO if NFEChave is valid
+            if produto_upper in products_no_seuno_validation:
+                # No SEUNO validation needed for these products
+                seuno_valid = True
+                seuno_motivo = ""
+            elif cedente in cedente_ranges:
+                # This cedente has pre-impresso ranges
+                ranges_list = cedente_ranges[cedente]
 
-            # Try to find matching range based on empresa
-            matching_pair = None
-            for company, range_val in ranges_list:
-                if empresa and company in empresa.upper():
-                    matching_pair = {'company': company, 'range': range_val}
-                    break
+                # Try to find matching range based on empresa
+                matching_pair = None
+                for company, range_val in ranges_list:
+                    if empresa and company in empresa.upper():
+                        matching_pair = {'company': company, 'range': range_val}
+                        break
 
-            if not matching_pair and ranges_list:
-                # Use first range if no match found
-                matching_pair = {'company': ranges_list[0][0], 'range': ranges_list[0][1]}
+                if not matching_pair and ranges_list:
+                    # Use first range if no match found
+                    matching_pair = {'company': ranges_list[0][0], 'range': ranges_list[0][1]}
 
-            if matching_pair:
-                seuno_company = matching_pair['company']
-                seuno_range = matching_pair['range']
-                verification_digit = calculate_verification_digit(seuno or '')
-                seuno_valid, seuno_motivo = validate_seuno(seuno, seuno_range, verification_digit)
+                if matching_pair:
+                    seuno_company = matching_pair['company']
+                    seuno_range = matching_pair['range']
+                    verification_digit = calculate_verification_digit(seuno or '')
+                    seuno_valid, seuno_motivo = validate_seuno(seuno, seuno_range, verification_digit)
 
         # Determine overall validity
-        is_valid = duplicata_valid and seuno_valid
+        is_valid = nfechave_valid and duplicata_valid and seuno_valid
 
         # Combine motivos
         motivos = []
+        if nfechave_motivo:
+            motivos.append(nfechave_motivo)
         if duplicata_motivo:
             motivos.append(f"DUPLICATA: {duplicata_motivo}")
         if seuno_motivo:
@@ -909,12 +1182,14 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
             'EMPRESA': empresa,
             'STATUS': status,
             'RAMO': ramo,  # Add RAMO field
+            'PRODUTO': produto,  # Add PRODUTO field
             'SEUNO': seuno,
             'DUPLICATA': duplicata,
             'NFE': nfe,
             'SEUNO_COMPANY': seuno_company,
             'SEUNO_RANGE': seuno_range,
             'VERIFICATION_DIGIT': verification_digit,
+            'NFECHAVE_VALID': nfechave_valid,
             'DUPLICATA_VALID': duplicata_valid,
             'SEUNO_VALID': seuno_valid,
             'IS_VALID': is_valid,
@@ -1090,6 +1365,77 @@ def export_invalid_duplicata_to_excel(invalid_records, target_date):
     return filepath
 
 
+def export_invalid_nfechave_to_excel(invalid_records, target_date):
+    """
+    Export invalid NFEChave records to Excel file.
+
+    Args:
+        invalid_records: List of invalid record dictionaries
+        target_date: Date object for the report
+
+    Returns:
+        Path to the created Excel file
+    """
+    # Create output directory
+    output_dir = Path(__file__).parent / 'nfechave_ausente'
+    output_dir.mkdir(exist_ok=True)
+
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"nfechave_ausente_{target_date.strftime('%Y-%m-%d')}_{timestamp}.xlsx"
+    filepath = output_dir / filename
+
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "NFEChave Ausente"
+
+    # Define headers
+    headers = [
+        'GERENTE', 'PROPOSTA', 'DATA', 'CEDENTE', 'EMPRESA', 'STATUS', 'RAMO',
+        'PRODUTO', 'MOTIVO_INVALIDO'
+    ]
+
+    # Write headers with formatting
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # Write data rows
+    for row_num, record in enumerate(invalid_records, 2):
+        ws.cell(row=row_num, column=1, value=record.get('GERENTE'))
+        ws.cell(row=row_num, column=2, value=record.get('PROPOSTA'))
+        ws.cell(row=row_num, column=3, value=record.get('DATA'))
+        ws.cell(row=row_num, column=4, value=record.get('CEDENTE'))
+        ws.cell(row=row_num, column=5, value=record.get('EMPRESA'))
+        ws.cell(row=row_num, column=6, value=record.get('STATUS'))
+        ws.cell(row=row_num, column=7, value=record.get('RAMO'))
+        ws.cell(row=row_num, column=8, value=record.get('PRODUTO'))
+        ws.cell(row=row_num, column=9, value=record.get('MOTIVO_INVALIDO'))
+
+    # Auto-adjust column widths
+    for col_num, header in enumerate(headers, 1):
+        col_letter = get_column_letter(col_num)
+        max_length = len(header)
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_num, max_col=col_num):
+            for cell in row:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
+
+    # Save workbook
+    wb.save(filepath)
+    print(f"\n✓ Excel file created: {filepath}")
+
+    return filepath
+
+
 def export_invalid_seuno_to_excel(invalid_records, target_date):
     """
     Export invalid SEUNO records to Excel file.
@@ -1166,6 +1512,78 @@ def export_invalid_seuno_to_excel(invalid_records, target_date):
     return filepath
 
 
+def export_invalid_cheque_to_excel(invalid_records, target_date):
+    """
+    Export invalid CHEQUE records to Excel file.
+
+    Args:
+        invalid_records: List of invalid record dictionaries
+        target_date: Date object for the report
+
+    Returns:
+        Path to the created Excel file
+    """
+    # Create output directory
+    output_dir = Path(__file__).parent / 'cheque_invalidos'
+    output_dir.mkdir(exist_ok=True)
+
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"cheque_invalidos_{target_date.strftime('%Y-%m-%d')}_{timestamp}.xlsx"
+    filepath = output_dir / filename
+
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "CHEQUE Inválido"
+
+    # Define headers
+    headers = [
+        'GERENTE', 'PROPOSTA', 'DATA', 'CEDENTE', 'EMPRESA', 'STATUS', 'RAMO',
+        'PRODUTO', 'QTD_TITULOS', 'MOTIVO_INVALIDO'
+    ]
+
+    # Write headers with formatting
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # Write data rows
+    for row_num, record in enumerate(invalid_records, 2):
+        ws.cell(row=row_num, column=1, value=record.get('GERENTE'))
+        ws.cell(row=row_num, column=2, value=record.get('PROPOSTA'))
+        ws.cell(row=row_num, column=3, value=record.get('DATA'))
+        ws.cell(row=row_num, column=4, value=record.get('CEDENTE'))
+        ws.cell(row=row_num, column=5, value=record.get('EMPRESA'))
+        ws.cell(row=row_num, column=6, value=record.get('STATUS'))
+        ws.cell(row=row_num, column=7, value=record.get('RAMO'))
+        ws.cell(row=row_num, column=8, value=record.get('PRODUTO'))
+        ws.cell(row=row_num, column=9, value=record.get('QTD_TITULOS'))
+        ws.cell(row=row_num, column=10, value=record.get('MOTIVO_INVALIDO'))
+
+    # Auto-adjust column widths
+    for col_letter in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']:
+        column = ws[col_letter]
+        max_length = 0
+        for cell in column:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
+
+    # Save workbook
+    wb.save(filepath)
+    print(f"\n✓ Excel file created: {filepath}")
+
+    return filepath
+
+
+
 def get_records_hash(records: list[dict], alert_type: str) -> str:
     """
     Generate a hash of the invalid records to track if they've been sent.
@@ -1211,7 +1629,7 @@ def get_tracking_file(alert_type: str) -> Path:
     running as a PyInstaller binary.
 
     Args:
-        alert_type: Type of alert ("DUPLICATA" or "SEUNO")
+        alert_type: Type of alert ("DUPLICATA", "SEUNO", or "NFECHAVE")
 
     Returns:
         Path to tracking file
@@ -1221,13 +1639,15 @@ def get_tracking_file(alert_type: str) -> Path:
 
     if alert_type == "DUPLICATA":
         tracking_dir = base_dir / 'duplicatas_invalidas_tracking'
-    else:  # SEUNO
+    elif alert_type == "SEUNO":
         tracking_dir = base_dir / 'seuno_invalidos_tracking'
+    else:  # NFECHAVE
+        tracking_dir = base_dir / 'nfechave_ausente_tracking'
 
     tracking_dir.mkdir(exist_ok=True)
 
     today = date.today().strftime('%Y-%m-%d')
-    return tracking_dir / f'.tracking_{today}.json'
+    return tracking_dir / f'.tracking_nfechave_{today}.json' if alert_type == "NFECHAVE" else tracking_dir / f'.tracking_{today}.json'
 
 
 def get_new_combinations(records: list[dict], alert_type: str) -> list[dict]:
@@ -1336,7 +1756,7 @@ def send_slack_notification(excel_file, invalid_count, target_date, alert_type="
         excel_file: Path to Excel file
         invalid_count: Number of invalid records
         target_date: Date object for the report
-        alert_type: Type of alert ("DUPLICATA" or "SEUNO")
+        alert_type: Type of alert ("DUPLICATA", "SEUNO", or "NFECHAVE")
         invalid_records: List of invalid record dictionaries
         dry_run: If True, don't actually send to Slack
     """
@@ -1359,8 +1779,10 @@ def send_slack_notification(excel_file, invalid_count, target_date, alert_type="
             # Regenerate Excel file with only NEW records
             if alert_type == "DUPLICATA":
                 excel_file = export_invalid_duplicata_to_excel(invalid_records, target_date)
-            else:  # SEUNO
+            elif alert_type == "SEUNO":
                 excel_file = export_invalid_seuno_to_excel(invalid_records, target_date)
+            else:  # NFECHAVE
+                excel_file = export_invalid_nfechave_to_excel(invalid_records, target_date)
 
         if dry_run:
             print(f"\n[DRY RUN] Would upload {alert_type} alert to Slack:")
@@ -1388,9 +1810,11 @@ def send_slack_notification(excel_file, invalid_count, target_date, alert_type="
 
         # Build message with list of cedentes
         if alert_type == "SEUNO":
-            message_title = "SEUNO Inválidos - Relatório de Pré-Impresso"
+            message_title = "⚠️ SEUNO Inválidos - Relatório de Pré-Impresso"
+        elif alert_type == "NFECHAVE":
+            message_title = "⚠️ NFEChave Ausente - Chaves de NF Faltando"
         else:
-            message_title = "DUPLICATAS com formato inválido"
+            message_title = "🚨 DUPLICATAS com formato inválido"
 
         message_lines = [f"*{message_title}*\n"]
 
@@ -1407,6 +1831,7 @@ def send_slack_notification(excel_file, invalid_count, target_date, alert_type="
                     motivo = motivo[7:]
                 elif alert_type == "DUPLICATA" and motivo.startswith("DUPLICATA: "):
                     motivo = motivo[11:]
+                # For NFECHAVE, motivo is already in the correct format
                 unique_errors.add((cedente, proposta, motivo))
 
             # Sort and add to message
@@ -1415,7 +1840,12 @@ def send_slack_notification(excel_file, invalid_count, target_date, alert_type="
 
         message = "\n".join(message_lines)
 
-        alert_title = f"{alert_type} Inválida" if alert_type == "DUPLICATA" else f"{alert_type} Inválido"
+        if alert_type == "DUPLICATA":
+            alert_title = "DUPLICATA Inválida"
+        elif alert_type == "SEUNO":
+            alert_title = "SEUNO Inválido"
+        else:  # NFECHAVE
+            alert_title = "NFEChave Ausente"
         filename = f'{alert_title}_{target_date.strftime("%Y-%m-%d")}.xlsx'
 
         # Step 1: Post the message first using chat.postMessage
@@ -1499,7 +1929,7 @@ def cleanup_old_tracking_files(alert_type="DUPLICATA", days_to_keep=7):
     Remove old tracking files, keeping only recent ones.
 
     Args:
-        alert_type: Type of alert ("DUPLICATA" or "SEUNO")
+        alert_type: Type of alert ("DUPLICATA", "SEUNO", or "NFECHAVE")
         days_to_keep: Number of days of tracking files to keep (default: 7)
     """
     # Use current working directory instead of __file__ to work with PyInstaller
@@ -1507,8 +1937,10 @@ def cleanup_old_tracking_files(alert_type="DUPLICATA", days_to_keep=7):
 
     if alert_type == "DUPLICATA":
         tracking_dir = base_dir / 'duplicatas_invalidas_tracking'
-    else:
+    elif alert_type == "SEUNO":
         tracking_dir = base_dir / 'seuno_invalidos_tracking'
+    else:  # NFECHAVE
+        tracking_dir = base_dir / 'nfechave_ausente_tracking'
 
     if not tracking_dir.exists():
         return
@@ -1516,10 +1948,14 @@ def cleanup_old_tracking_files(alert_type="DUPLICATA", days_to_keep=7):
     # Calculate cutoff date
     cutoff_date = date.today() - timedelta(days=days_to_keep)
 
-    for file in tracking_dir.glob('.tracking_*.json'):
+    pattern = '.tracking_nfechave_*.json' if alert_type == "NFECHAVE" else '.tracking_*.json'
+    for file in tracking_dir.glob(pattern):
         try:
-            # Extract date from filename: .tracking_YYYY-MM-DD.json
-            date_str = file.stem.replace('.tracking_', '')
+            # Extract date from filename: .tracking_YYYY-MM-DD.json or .tracking_nfechave_YYYY-MM-DD.json
+            if alert_type == "NFECHAVE":
+                date_str = file.stem.replace('.tracking_nfechave_', '')
+            else:
+                date_str = file.stem.replace('.tracking_', '')
             file_date = datetime.strptime(date_str, '%Y-%m-%d').date()
 
             if file_date < cutoff_date:
@@ -1535,14 +1971,17 @@ def cleanup_old_files(current_date, alert_type="DUPLICATA"):
 
     Args:
         current_date: Date object for the current report
-        alert_type: Type of alert ("DUPLICATA" or "SEUNO")
+        alert_type: Type of alert ("DUPLICATA", "SEUNO", or "NFECHAVE")
     """
     if alert_type == "DUPLICATA":
         output_dir = Path(__file__).parent / 'duplicatas_invalidas'
         file_pattern = 'duplicatas_invalidas_*.xlsx'
-    else:
+    elif alert_type == "SEUNO":
         output_dir = Path(__file__).parent / 'seuno_invalidos'
         file_pattern = 'seuno_invalidos_*.xlsx'
+    else:  # NFECHAVE
+        output_dir = Path(__file__).parent / 'nfechave_ausente'
+        file_pattern = 'nfechave_ausente_*.xlsx'
 
     if not output_dir.exists():
         return
@@ -1742,6 +2181,9 @@ def print_valid_records_table(valid_records, max_rows=100):
 def main():
     """Main function."""
     try:
+        # Track execution start time
+        start_time = datetime.now()
+
         # Check for dry-run flag (default is now production mode)
         dry_run = '--dry-run' in sys.argv  # Only dry-run if explicitly requested
 
@@ -1755,7 +2197,7 @@ def main():
             print("=" * 140)
 
         print("=" * 140)
-        print("APR INVALID RECORDS CHECKER - DUPLICATA & SEUNO with STATUS")
+        print("APR INVALID RECORDS CHECKER - NFECHAVE, DUPLICATA & SEUNO with STATUS")
         print("=" * 140)
         print("Status Filter: Only processing records with status >= 'Aguardando Analista'")
         print("=" * 140)
@@ -1776,16 +2218,109 @@ def main():
         Session = sessionmaker(bind=engine)
         session = Session()
 
+        # Create MariaDB session for monitoring (if not dry-run)
+        mariadb_session = None
+        if not dry_run:
+            mariadb_session = create_mariadb_session(config)
+
         # Query and validate records (with status filter enabled)
         validated_results = query_apr_invalidos_with_status(session, target_date, apply_status_filter=True)
 
+        # ========================================================================
+        # TRACK ALL STATUS CHANGES FROM MSSQL SOURCE
+        # ========================================================================
+        # This must be done BEFORE validation to capture ALL status changes
+        # including for proposals that may be invalid
+        if not dry_run and mariadb_session:
+            print("\n" + "=" * 140)
+            print("TRACKING STATUS CHANGES FROM MSSQL SOURCE")
+            print("=" * 140)
+            print("Querying ALL proposals from MSSQL to detect status changes...")
+
+            try:
+                status_changes = track_all_status_changes_from_source(
+                    mssql_session=session,
+                    mariadb_session=mariadb_session,
+                    target_date=target_date,
+                    change_source='SYSTEM'
+                )
+                print(f"✓ Tracked {status_changes} status changes (including value changes)")
+            except Exception as e:
+                print(f"⚠️  Warning: Could not track status changes: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # ========================================================================
+        # CHEQUE VALIDATION: Check proposals with ONLY CHEQUE products
+        # ========================================================================
+        invalid_cheque, validated_results = validate_cheque_proposals(session, validated_results, target_date)
+
         # Separate by validation type
-        invalid_duplicata = [r for r in validated_results if not r['DUPLICATA_VALID']]
-        invalid_seuno = [r for r in validated_results if not r['SEUNO_VALID']]
+        invalid_nfechave = [r for r in validated_results if not r['NFECHAVE_VALID']]
+        invalid_duplicata = [r for r in validated_results if not r['DUPLICATA_VALID'] and r['NFECHAVE_VALID']]
+        invalid_seuno = [r for r in validated_results if not r['SEUNO_VALID'] and r['NFECHAVE_VALID']]
         all_invalid = [r for r in validated_results if not r['IS_VALID']]
 
         # Print summary
         print_summary(validated_results)
+
+        # ========================================================================
+        # STEP -1: Handle Invalid CHEQUE Records (BEFORE all other validations)
+        # ========================================================================
+        if invalid_cheque:
+            print("\n" + "=" * 140)
+            print("STEP -1: PROCESSING INVALID CHEQUE RECORDS (Quantity > 100)")
+            print("=" * 140)
+
+            # Print table
+            print_invalid_records_table(invalid_cheque, title="INVALID CHEQUE RECORDS (QTD > 100)")
+
+            # Export to Excel
+            excel_file = export_invalid_cheque_to_excel(invalid_cheque, target_date)
+
+            # Send Slack notification
+            send_slack_notification(excel_file, len(invalid_cheque), target_date,
+                                   alert_type="CHEQUE", invalid_records=invalid_cheque, dry_run=dry_run)
+
+            # Log invalid records to monitoring database
+            if not dry_run and mariadb_session:
+                log_invalid_records(mariadb_session, invalid_cheque, 'CHEQUE',
+                                   alerted_count=len(invalid_cheque))
+                print(f"  ✓ Logged {len(invalid_cheque)} invalid CHEQUE records to monitoring database")
+
+            # Cleanup old files
+            cleanup_old_files(target_date, alert_type="CHEQUE")
+        else:
+            print("\n✓ No invalid CHEQUE records found (all CHEQUE-only proposals have <= 100 titles)!")
+
+        # ========================================================================
+        # STEP 0: Handle Invalid NFEChave Records (BEFORE DUPLICATA and SEUNO)
+        # ========================================================================
+        if invalid_nfechave:
+            print("\n" + "=" * 140)
+            print("STEP 0: PROCESSING INVALID NFECHAVE RECORDS")
+            print("=" * 140)
+
+            # Print table
+            print_invalid_records_table(invalid_nfechave, title="INVALID NFECHAVE RECORDS")
+
+            # Export to Excel
+            excel_file = export_invalid_nfechave_to_excel(invalid_nfechave, target_date)
+
+            # Send Slack notification
+            send_slack_notification(excel_file, len(invalid_nfechave), target_date,
+                                   alert_type="NFECHAVE", invalid_records=invalid_nfechave, dry_run=dry_run)
+
+            # Log invalid records to monitoring database
+            if not dry_run and mariadb_session:
+                log_invalid_records(mariadb_session, invalid_nfechave, 'NFECHAVE',
+                                   alerted_count=len(invalid_nfechave))
+                print(f"  ✓ Logged {len(invalid_nfechave)} invalid NFEChave records to monitoring database")
+
+            # Cleanup old files
+            cleanup_old_files(target_date, alert_type="NFECHAVE")
+        else:
+            print("\n✓ No invalid NFEChave records found!")
 
         # ========================================================================
         # STEP 1: Handle Invalid DUPLICATA Records
@@ -1804,6 +2339,12 @@ def main():
             # Send Slack notification
             send_slack_notification(excel_file, len(invalid_duplicata), target_date,
                                    alert_type="DUPLICATA", invalid_records=invalid_duplicata, dry_run=dry_run)
+
+            # Log invalid records to monitoring database
+            if not dry_run and mariadb_session:
+                log_invalid_records(mariadb_session, invalid_duplicata, 'DUPLICATA',
+                                   alerted_count=len(invalid_duplicata))
+                print(f"  ✓ Logged {len(invalid_duplicata)} invalid DUPLICATA records to monitoring database")
 
             # Cleanup old files
             cleanup_old_files(target_date, alert_type="DUPLICATA")
@@ -1828,6 +2369,12 @@ def main():
             send_slack_notification(excel_file, len(invalid_seuno), target_date,
                                    alert_type="SEUNO", invalid_records=invalid_seuno, dry_run=dry_run)
 
+            # Log invalid records to monitoring database
+            if not dry_run and mariadb_session:
+                log_invalid_records(mariadb_session, invalid_seuno, 'SEUNO',
+                                   alerted_count=len(invalid_seuno))
+                print(f"  ✓ Logged {len(invalid_seuno)} invalid SEUNO records to monitoring database")
+
             # Cleanup old files
             cleanup_old_files(target_date, alert_type="SEUNO")
         else:
@@ -1840,13 +2387,37 @@ def main():
         print("STEP 3: QUERYING VALID RECORDS WITH STATUS FILTER")
         print("=" * 140)
 
-        # Create set of invalid record keys to exclude
+        # Create set of invalid PROPOSALS to exclude (proposal-level exclusion)
+        # If ANY record in a proposal has invalid NFEChave, DUPLICATA, or SEUNO,
+        # exclude the ENTIRE proposal from apr_valid_records table
+        invalid_proposals = set()
+        for r in all_invalid:
+            invalid_proposals.add((r['DATA'], r['PROPOSTA']))
+
+        print(f"\n⚠️  Excluding {len(invalid_proposals)} proposals with invalid records from apr_valid_records table")
+        print(f"   (Proposals with ANY invalid NFEChave, DUPLICATA, or SEUNO record)")
+
+        # Create set of invalid record keys to exclude (for backward compatibility)
         invalid_keys = set()
         for r in all_invalid:
             invalid_keys.add((r['DATA'], r['PROPOSTA'], r['DUPLICATA']))
 
         # Query valid records
         valid_records = query_valid_records_with_status_filter(session, target_date, invalid_keys)
+
+        # ADDITIONAL FILTER: Exclude entire proposals that have ANY invalid record
+        # This ensures proposal-level exclusion as requested
+        valid_records_filtered = []
+        for record in valid_records:
+            proposal_key = (record['DATA'], record['PROPOSTA'])
+            if proposal_key not in invalid_proposals:
+                valid_records_filtered.append(record)
+
+        excluded_count = len(valid_records) - len(valid_records_filtered)
+        if excluded_count > 0:
+            print(f"   Filtered out {excluded_count} additional valid records from proposals with invalid records")
+
+        valid_records = valid_records_filtered
 
         # Display valid records
         print_valid_records_table(valid_records)
@@ -1871,6 +2442,15 @@ def main():
                 print(f"  - Updated: {updated} existing records")
                 print(f"  - Total processed: {inserted + updated} records")
 
+                # Track products for each proposal
+                if mariadb_session:
+                    print(f"\n📊 Tracking product types for proposals...")
+                    products_tracked = track_proposal_products(mariadb_session, session, target_date)
+                    print(f"  ✓ Tracked {products_tracked} product entries")
+
+                # Note: Status changes are now tracked at the beginning of the program
+                # using track_all_status_changes_from_source() which queries MSSQL directly
+
             # Close MariaDB connection
             mariadb_conn.close()
 
@@ -1881,11 +2461,72 @@ def main():
         # Close MSSQL session
         session.close()
 
+        # ========================================================================
+        # STEP 5: Finalize Monitoring (if not dry-run)
+        # ========================================================================
+        if not dry_run and mariadb_session:
+            print("\n" + "=" * 140)
+            print("STEP 5: FINALIZING MONITORING")
+            print("=" * 140)
+
+            # Calculate execution time
+            execution_time = int((datetime.now() - start_time).total_seconds())
+
+            # Prepare execution statistics
+            stats = {
+                'total_records_queried': len(validated_results),
+                'valid_records': len(valid_records),
+                'invalid_nfechave': len(invalid_nfechave),
+                'invalid_duplicata': len(invalid_duplicata),
+                'invalid_seuno': len(invalid_seuno),
+                'invalid_cheque': len(invalid_cheque) if 'invalid_cheque' in locals() else 0,
+                'records_stored': inserted + updated if 'inserted' in locals() else 0,
+                'alerts_sent_nfechave': len(invalid_nfechave) if invalid_nfechave else 0,
+                'alerts_sent_duplicata': len(invalid_duplicata) if invalid_duplicata else 0,
+                'alerts_sent_seuno': len(invalid_seuno) if invalid_seuno else 0,
+                'alerts_sent_cheque': len(invalid_cheque) if 'invalid_cheque' in locals() and invalid_cheque else 0
+            }
+
+            # Log program execution
+            print(f"\n📝 Logging program execution...")
+            log_program_execution(mariadb_session, target_date, stats, execution_time,
+                                 run_mode='PRODUCTION')
+            print(f"  ✓ Execution logged (runtime: {execution_time}s)")
+
+            # Update daily summary
+            print(f"\n📊 Updating daily summary...")
+            update_daily_summary(mariadb_session, target_date)
+            print(f"  ✓ Daily summary updated")
+
+            # Auto-resolve invalid records that are now valid
+            print(f"\n🔄 Checking for auto-resolved records...")
+            resolved = auto_resolve_invalid_records(mariadb_session, target_date)
+            if resolved > 0:
+                print(f"  ✓ Auto-resolved {resolved} invalid records")
+            else:
+                print(f"  ℹ️  No records to auto-resolve")
+
+            # Cleanup old monitoring data (30-day retention)
+            print(f"\n🧹 Cleaning up old monitoring data (30-day retention)...")
+            deleted = cleanup_old_monitoring_data(mariadb_session, retention_days=30)
+            total_deleted = sum(deleted.values())
+            if total_deleted > 0:
+                print(f"  ✓ Cleaned up {total_deleted} old records:")
+                for table, count in deleted.items():
+                    if count > 0:
+                        print(f"    - {table}: {count} records")
+            else:
+                print(f"  ℹ️  No old data to clean up")
+
+            # Close MariaDB session
+            mariadb_session.close()
+            print(f"\n✓ Monitoring finalized")
+
         print("\n" + "=" * 140)
         print("✓ Program completed successfully")
         if dry_run:
             print("ℹ️  This was a DRY RUN - no Slack notifications or MariaDB updates were made")
-            print("   To send notifications and store data, run with: --send")
+            print("   To send notifications and store data, run without --dry-run flag")
         print("=" * 140)
 
         return 0
@@ -1894,6 +2535,14 @@ def main():
         print(f"\n✗ Error: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
+
+        # Close MariaDB session if it exists
+        if 'mariadb_session' in locals() and mariadb_session:
+            try:
+                mariadb_session.close()
+            except:
+                pass
+
         return 1
 
 

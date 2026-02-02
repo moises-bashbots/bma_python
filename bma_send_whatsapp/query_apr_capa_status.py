@@ -307,13 +307,14 @@ def send_alert_message(phone: str, message: str, cedente: Optional[str] = None) 
         return False
 
 
-def send_status_message(contact: Dict[str, Any], record: Dict[str, Any], message_hash: Optional[str] = None) -> bool:
+def send_status_message(contact: Dict[str, Any], record: Dict[str, Any], message_id: Optional[str] = None, message_hash: Optional[str] = None) -> bool:
     """
     Send status message to WhatsApp contact based on APR_CAPA status.
 
     Args:
         contact: WhatsApp contact info
         record: APR_CAPA record data
+        message_id: Unique message ID for tracking (optional)
         message_hash: MD5 hash for duplicate detection (optional)
 
     Returns:
@@ -354,6 +355,7 @@ def send_status_message(contact: Dict[str, Any], record: Dict[str, Any], message
         # Prepare metadata for logging
         metadata = {
             'tipo_mensagem': 'status_update',
+            'message_id': message_id,
             'message_hash': message_hash,
             'nome_contato': contact.get('name'),
             'is_group': contact.get('isGroup', False),
@@ -515,7 +517,7 @@ def query_apr_capa_with_status(target_date: str) -> List[Dict[str, Any]]:
             else:
                 # Single contact found - send status message
                 print(f"✓ Contact found: {contact['name']} ({contact['phone']})")
-                success = send_status_message(contact, record, message_hash=message_id)
+                success = send_status_message(contact, record, message_id=message_id, message_hash=message_id)
 
                 # If message was sent successfully, save the message ID
                 if success:
