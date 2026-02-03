@@ -353,6 +353,7 @@ def api_all_proposals():
     try:
         with conn.cursor() as cursor:
             # Get all valid proposals with product types
+            # Use the most recent status from apr_status_history if available, otherwise use v.STATUS
             cursor.execute("""
                 SELECT
                     v.DATA,
@@ -361,7 +362,16 @@ def api_all_proposals():
                     v.RAMO,
                     v.GERENTE,
                     v.EMPRESA,
-                    v.STATUS,
+                    COALESCE(
+                        (SELECT NEW_STATUS
+                         FROM apr_status_history h
+                         WHERE h.DATA = v.DATA
+                           AND h.PROPOSTA = v.PROPOSTA
+                           AND h.CEDENTE = v.CEDENTE
+                         ORDER BY h.changed_at DESC
+                         LIMIT 1),
+                        v.STATUS
+                    ) as STATUS,
                     v.VLR_APROVADOS,
                     v.QTD_APROVADOS,
                     v.VALOR_TITULOS,
@@ -380,37 +390,47 @@ def api_all_proposals():
                     AND v.PROPOSTA = p.PROPOSTA
                     AND v.CEDENTE = p.CEDENTE
                 WHERE v.DATA = CURDATE()
-                GROUP BY v.DATA, v.PROPOSTA, v.CEDENTE, v.RAMO, v.GERENTE, v.EMPRESA, v.STATUS,
+                GROUP BY v.DATA, v.PROPOSTA, v.CEDENTE, v.RAMO, v.GERENTE, v.EMPRESA,
                          v.VLR_APROVADOS, v.QTD_APROVADOS, v.VALOR_TITULOS, v.QTD_TITULOS,
                          v.first_seen, v.last_updated, v.is_processado, v.is_bot_processed
             """)
             valid_proposals = cursor.fetchall()
 
             # Get all invalid proposals with error types grouped
+            # Use the most recent status from apr_status_history if available
             cursor.execute("""
                 SELECT
-                    DATA,
-                    PROPOSTA,
-                    CEDENTE,
-                    RAMO,
-                    GERENTE,
-                    EMPRESA,
-                    STATUS,
+                    i.DATA,
+                    i.PROPOSTA,
+                    i.CEDENTE,
+                    i.RAMO,
+                    i.GERENTE,
+                    i.EMPRESA,
+                    COALESCE(
+                        (SELECT NEW_STATUS
+                         FROM apr_status_history h
+                         WHERE h.DATA = i.DATA
+                           AND h.PROPOSTA = i.PROPOSTA
+                           AND h.CEDENTE = i.CEDENTE
+                         ORDER BY h.changed_at DESC
+                         LIMIT 1),
+                        i.STATUS
+                    ) as STATUS,
                     0 as VLR_APROVADOS,
                     0 as QTD_APROVADOS,
                     0 as VALOR_TITULOS,
                     0 as QTD_TITULOS,
-                    MIN(detected_at) as first_seen,
-                    MAX(detected_at) as last_updated,
+                    MIN(i.detected_at) as first_seen,
+                    MAX(i.detected_at) as last_updated,
                     0 as is_processado,
                     0 as is_bot_processed,
                     'INVALID' as VALIDATION_STATUS,
-                    GROUP_CONCAT(DISTINCT VALIDATION_TYPE ORDER BY VALIDATION_TYPE SEPARATOR ', ') as VALIDATION_TYPE,
-                    GROUP_CONCAT(DISTINCT MOTIVO ORDER BY MOTIVO SEPARATOR ' | ') as MOTIVO,
-                    GROUP_CONCAT(DISTINCT PRODUTO ORDER BY PRODUTO SEPARATOR ', ') as PRODUTOS
-                FROM apr_invalid_records
-                WHERE DATA = CURDATE() AND is_resolved = 0
-                GROUP BY DATA, PROPOSTA, CEDENTE, RAMO, GERENTE, EMPRESA, STATUS
+                    GROUP_CONCAT(DISTINCT i.VALIDATION_TYPE ORDER BY i.VALIDATION_TYPE SEPARATOR ', ') as VALIDATION_TYPE,
+                    GROUP_CONCAT(DISTINCT i.MOTIVO ORDER BY i.MOTIVO SEPARATOR ' | ') as MOTIVO,
+                    GROUP_CONCAT(DISTINCT i.PRODUTO ORDER BY i.PRODUTO SEPARATOR ', ') as PRODUTOS
+                FROM apr_invalid_records i
+                WHERE i.DATA = CURDATE() AND i.is_resolved = 0
+                GROUP BY i.DATA, i.PROPOSTA, i.CEDENTE, i.RAMO, i.GERENTE, i.EMPRESA
             """)
             invalid_proposals = cursor.fetchall()
 
