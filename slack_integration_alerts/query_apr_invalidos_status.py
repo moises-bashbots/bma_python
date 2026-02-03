@@ -27,7 +27,7 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 from sqlalchemy import create_engine, or_, and_, func, cast, Date
 from sqlalchemy.orm import sessionmaker
-from models import Cedente, APRTitulos, APRCapa, Produto, ProdutoAtributo, ProdutoCedente
+from models import Cedente, APRTitulos, APRCapa, Produto, ProdutoCedente
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -945,11 +945,8 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         ProdutoCedente,
         APRTitulos.id_produto == ProdutoCedente.Id
     ).outerjoin(
-        ProdutoAtributo,
-        ProdutoCedente.IdProdutoAtributo == ProdutoAtributo.Id
-    ).outerjoin(
         Produto,
-        ProdutoAtributo.IdProduto == Produto.Id
+        ProdutoCedente.IdProdutoAtributo == Produto.Id
     ).filter(
         cast(APRCapa.DATA, Date) == target_date,
         APRTitulos.NFEChave.isnot(None),
@@ -1044,11 +1041,8 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         ProdutoCedente,
         APRTitulos.id_produto == ProdutoCedente.Id
     ).join(
-        ProdutoAtributo,
-        ProdutoCedente.IdProdutoAtributo == ProdutoAtributo.Id
-    ).join(
         Produto,
-        ProdutoAtributo.IdProduto == Produto.Id
+        ProdutoCedente.IdProdutoAtributo == Produto.Id
     ).filter(
         cast(APRCapa.DATA, Date) == target_date,
         or_(
