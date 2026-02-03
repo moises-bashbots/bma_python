@@ -174,10 +174,10 @@ def track_all_status_changes_from_source(
         APRCapa.status_atual,
         APRCapa.QTD_APROVADOS,
         APRCapa.VLR_APROVADOS,
-        MSSQLCedente.RAMO
+        MSSQLCedente.ramo
     ).outerjoin(
         MSSQLCedente,
-        APRCapa.CEDENTE == MSSQLCedente.APELIDO
+        APRCapa.CEDENTE == MSSQLCedente.apelido
     ).filter(
         APRCapa.DATA == target_date
     ).all()
@@ -189,10 +189,10 @@ def track_all_status_changes_from_source(
         data = mssql_prop.DATA.date() if hasattr(mssql_prop.DATA, 'date') else mssql_prop.DATA
         proposta = mssql_prop.NUMERO
         cedente = mssql_prop.CEDENTE
-        current_status = mssql_prop.STATUS_ATUAL
+        current_status = mssql_prop.status_atual
         current_vlr = mssql_prop.VLR_APROVADOS or 0
         current_qty = mssql_prop.QTD_APROVADOS or 0
-        ramo = mssql_prop.RAMO
+        ramo = mssql_prop.ramo
 
         # Get the most recent history entry for this proposal
         last_history = mariadb_session.query(APRStatusHistory).filter(
