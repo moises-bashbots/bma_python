@@ -535,6 +535,13 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                 print(f"  - Proposta {record.PROPOSTA}: {record.CEDENTE} ({record.RAMO}) - {record.STATUS}")
             if len(db_records) > 10:
                 print(f"  ... and {len(db_records) - 10} more")
+        else:
+            print("\n⚠ No unprocessed valid records found for today")
+            print("✓ Nothing to process - browser will not be opened")
+            print("=" * 80)
+            if session:
+                session.close()
+            return True  # Success - nothing to do
         print()
     except Exception as e:
         print(f"⚠ Warning: Could not query database: {e}")
@@ -542,6 +549,7 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
         db_records = []
         session = None
 
+    # Only launch browser if there are records to process
     with sync_playwright() as p:
         # Launch browser
         print(f"\n🌐 Launching browser (headless={headless})...")
@@ -732,7 +740,7 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                         time.sleep(pause_seconds)
                                                         print(f"✓ Page loaded after Grava")
 
-                                                        # Step 3: Click on "Processar" button
+                                                        # Step 3: Click on "Processar" button with timeout detection
                                                         print(f"\n🔘 Step 3: Clicking 'Processar' button...")
 
                                                         # Re-query the Processar button (page may have updated)
@@ -742,12 +750,48 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                             processar_button.click()
                                                             print(f"✓ Clicked 'Processar' button")
 
-                                                            # Wait for page to process
-                                                            print(f"   Waiting for page to process...")
-                                                            time.sleep(3)
-                                                            page.wait_for_load_state("domcontentloaded", timeout=60000)
-                                                            time.sleep(2)
-                                                            print(f"✓ Page processed after Processar")
+                                                            # Wait for page to process with timeout detection
+                                                            print(f"   Waiting for page to process (15 second timeout)...")
+                                                            try:
+                                                                time.sleep(3)
+                                                                # Use 15 second timeout as requested
+                                                                page.wait_for_load_state("domcontentloaded", timeout=15000)
+                                                                time.sleep(2)
+                                                                print(f"✓ Page processed after Processar")
+                                                            except PlaywrightTimeout:
+                                                                print(f"⚠️  Page unresponsive after clicking 'Processar' (15+ seconds)")
+                                                                print(f"   Closing browser and restarting process...")
+
+                                                                # Close browser
+                                                                try:
+                                                                    browser.close()
+                                                                except:
+                                                                    pass
+
+                                                                # Close database session
+                                                                if session:
+                                                                    try:
+                                                                        session.close()
+                                                                    except:
+                                                                        pass
+
+                                                                # Restart the entire process by calling this function recursively
+                                                                print(f"\n{'='*80}")
+                                                                print(f"RESTARTING PROCESS DUE TO TIMEOUT")
+                                                                print(f"{'='*80}\n")
+
+                                                                # Wait a bit before restarting
+                                                                time.sleep(5)
+
+                                                                # Recursive call to restart
+                                                                return send_rating_vadu(
+                                                                    rating_group=rating_group,
+                                                                    headless=headless,
+                                                                    dry_run=dry_run,
+                                                                    pause_seconds=pause_seconds,
+                                                                    final_pause=final_pause,
+                                                                    target_date=target_date
+                                                                )
                                                         else:
                                                             print(f"❌ Could not find 'Processar' button after Grava")
                                                     else:
