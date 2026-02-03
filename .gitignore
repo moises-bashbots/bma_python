@@ -73,3 +73,4 @@ slack_integration_alerts/duplicatas_invalidas/.tracking_*.json
 
 # WhatsApp message tracking
 bma_send_whatsapp/message_tracking/
+nohup.out

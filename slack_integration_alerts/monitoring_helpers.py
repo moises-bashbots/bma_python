@@ -531,13 +531,14 @@ def track_proposal_products(
     Returns:
         Number of product records created/updated
     """
-    from models import APRCapa, APRTitulos, Produto, ProdutoCedente, ProdutoAtributo
+    from models import APRCapa, APRTitulos, Produto, ProdutoCedente
     from sqlalchemy import cast, Date, func
 
     try:
         # Query products for all proposals on target_date
         # Group by proposal and product to get aggregated counts and values
-        # Join chain: APRTitulos.id_produto -> ProdutoCedente.Id -> ProdutoAtributo.Id -> Produto.Id
+        # Join chain: APRTitulos.id_produto -> ProdutoCedente.Id -> ProdutoCedente.IdProdutoAtributo -> Produto.Id
+        # FIXED: Bypass broken ProdutoAtributo table - join ProdutoCedente.IdProdutoAtributo directly to Produto.Id
         # Use COALESCE to handle NULL products (titles without product assigned)
         from sqlalchemy import func as sqlfunc, case
 
@@ -558,11 +559,8 @@ def track_proposal_products(
             ProdutoCedente,
             APRTitulos.id_produto == ProdutoCedente.Id
         ).outerjoin(
-            ProdutoAtributo,
-            ProdutoCedente.IdProdutoAtributo == ProdutoAtributo.Id
-        ).outerjoin(
             Produto,
-            ProdutoAtributo.IdProduto == Produto.Id
+            ProdutoCedente.IdProdutoAtributo == Produto.Id
         ).filter(
             cast(APRCapa.DATA, Date) == target_date
         ).group_by(
