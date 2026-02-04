@@ -42,7 +42,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_
 
 # Session configuration
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # 8 hours session timeout
-app.config['SESSION_COOKIE_SECURE'] = True  # Require HTTPS for session cookies
+app.config['SESSION_COOKIE_SECURE'] = False  # TEMPORARILY DISABLED: Require HTTPS for session cookies
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to session cookie
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
 
