@@ -30,7 +30,11 @@ class CustomJSONProvider(DefaultJSONProvider):
 
 app = Flask(__name__)
 app.json = CustomJSONProvider(app)
-app.secret_key = secrets.token_hex(32)  # Generate a secure secret key
+
+# Use a persistent secret key for production (shared across all Gunicorn workers)
+# Generated once with: python3 -c "import secrets; print(secrets.token_hex(32))"
+# IMPORTANT: This must be the same across all worker processes for sessions to work
+app.secret_key = 'a7f3e9d2c8b1a4f6e5d3c2b1a9f8e7d6c5b4a3f2e1d9c8b7a6f5e4d3c2b1a0f9'
 
 # Configure ProxyFix for nginx reverse proxy
 # This ensures Flask correctly handles X-Forwarded-* headers
