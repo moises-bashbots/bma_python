@@ -84,8 +84,7 @@ def get_todays_valid_records(session, target_date=None):
         APRValidRecord.DATA == target_date,
         APRValidRecord.is_processado == 0
     ).order_by(
-        APRValidRecord.CEDENTE,
-        APRValidRecord.PROPOSTA
+        APRValidRecord.PROPOSTA.asc()  # Process oldest proposals first (ascending order)
     ).all()
 
     return records
