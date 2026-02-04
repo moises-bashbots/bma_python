@@ -398,7 +398,7 @@ def api_all_proposals():
                          v.VLR_APROVADOS, v.QTD_APROVADOS, v.VALOR_TITULOS, v.QTD_TITULOS,
                          v.first_seen, v.last_updated, v.is_processado, v.is_bot_processed
             """)
-            valid_proposals = cursor.fetchall()
+            valid_proposals = list(cursor.fetchall())
 
             # Get all invalid proposals with error types grouped
             # Use the most recent status from apr_status_history if available
@@ -439,7 +439,7 @@ def api_all_proposals():
                 WHERE i.DATA = CURDATE() AND i.is_resolved = 0
                 GROUP BY i.DATA, i.PROPOSTA, i.CEDENTE, i.RAMO, i.GERENTE, i.EMPRESA, i.STATUS, h.NEW_STATUS
             """)
-            invalid_proposals = cursor.fetchall()
+            invalid_proposals = list(cursor.fetchall())
 
             # Combine both lists
             all_proposals = valid_proposals + invalid_proposals
