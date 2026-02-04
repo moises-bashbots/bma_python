@@ -362,16 +362,7 @@ def api_all_proposals():
                     v.RAMO,
                     v.GERENTE,
                     v.EMPRESA,
-                    COALESCE(
-                        (SELECT NEW_STATUS
-                         FROM apr_status_history h
-                         WHERE h.DATA = v.DATA
-                           AND h.PROPOSTA = v.PROPOSTA
-                           AND h.CEDENTE = v.CEDENTE
-                         ORDER BY h.changed_at DESC
-                         LIMIT 1),
-                        v.STATUS
-                    ) as STATUS,
+                    COALESCE(h.NEW_STATUS, v.STATUS) as STATUS,
                     v.VLR_APROVADOS,
                     v.QTD_APROVADOS,
                     v.VALOR_TITULOS,
@@ -389,8 +380,21 @@ def api_all_proposals():
                     ON v.DATA = p.DATA
                     AND v.PROPOSTA = p.PROPOSTA
                     AND v.CEDENTE = p.CEDENTE
+                LEFT JOIN (
+                    SELECT
+                        DATA,
+                        PROPOSTA,
+                        CEDENTE,
+                        NEW_STATUS,
+                        ROW_NUMBER() OVER (PARTITION BY DATA, PROPOSTA, CEDENTE ORDER BY changed_at DESC) as rn
+                    FROM apr_status_history
+                ) h ON v.DATA = h.DATA
+                   AND v.PROPOSTA = h.PROPOSTA
+                   AND v.CEDENTE = h.CEDENTE
+                   AND h.rn = 1
                 WHERE v.DATA = CURDATE()
                 GROUP BY v.DATA, v.PROPOSTA, v.CEDENTE, v.RAMO, v.GERENTE, v.EMPRESA,
+                         v.STATUS, h.NEW_STATUS,
                          v.VLR_APROVADOS, v.QTD_APROVADOS, v.VALOR_TITULOS, v.QTD_TITULOS,
                          v.first_seen, v.last_updated, v.is_processado, v.is_bot_processed
             """)
@@ -406,16 +410,7 @@ def api_all_proposals():
                     i.RAMO,
                     i.GERENTE,
                     i.EMPRESA,
-                    COALESCE(
-                        (SELECT NEW_STATUS
-                         FROM apr_status_history h
-                         WHERE h.DATA = i.DATA
-                           AND h.PROPOSTA = i.PROPOSTA
-                           AND h.CEDENTE = i.CEDENTE
-                         ORDER BY h.changed_at DESC
-                         LIMIT 1),
-                        i.STATUS
-                    ) as STATUS,
+                    COALESCE(h.NEW_STATUS, i.STATUS) as STATUS,
                     0 as VLR_APROVADOS,
                     0 as QTD_APROVADOS,
                     0 as VALOR_TITULOS,
@@ -429,8 +424,20 @@ def api_all_proposals():
                     GROUP_CONCAT(DISTINCT i.MOTIVO ORDER BY i.MOTIVO SEPARATOR ' | ') as MOTIVO,
                     GROUP_CONCAT(DISTINCT i.PRODUTO ORDER BY i.PRODUTO SEPARATOR ', ') as PRODUTOS
                 FROM apr_invalid_records i
+                LEFT JOIN (
+                    SELECT
+                        DATA,
+                        PROPOSTA,
+                        CEDENTE,
+                        NEW_STATUS,
+                        ROW_NUMBER() OVER (PARTITION BY DATA, PROPOSTA, CEDENTE ORDER BY changed_at DESC) as rn
+                    FROM apr_status_history
+                ) h ON i.DATA = h.DATA
+                   AND i.PROPOSTA = h.PROPOSTA
+                   AND i.CEDENTE = h.CEDENTE
+                   AND h.rn = 1
                 WHERE i.DATA = CURDATE() AND i.is_resolved = 0
-                GROUP BY i.DATA, i.PROPOSTA, i.CEDENTE, i.RAMO, i.GERENTE, i.EMPRESA
+                GROUP BY i.DATA, i.PROPOSTA, i.CEDENTE, i.RAMO, i.GERENTE, i.EMPRESA, i.STATUS, h.NEW_STATUS
             """)
             invalid_proposals = cursor.fetchall()
 
