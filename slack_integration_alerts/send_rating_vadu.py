@@ -865,23 +865,45 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                         else:
                             print(f"\n⚠ No RAMO found for this record, skipping rating selection")
 
-                        # Go back to Proposta page
-                        print(f"\n⬅ Going back to Proposta page...")
-                        page.go_back()
-                        time.sleep(pause_seconds)
-                        print(f"✓ Back to Proposta page")
+                        # Return to Proposta list page by re-navigating (more reliable than go_back)
+                        print(f"\n⬅ Returning to Proposta list page...")
+                        try:
+                            navigate_to_proposta(page, pause_seconds=pause_seconds)
+                            print(f"✓ Back to Proposta list page")
+                        except Exception as nav_error:
+                            print(f"⚠ Could not navigate back to Proposta page: {nav_error}")
+                            # If navigation fails, try to recover by going to home and then to Proposta
+                            try:
+                                print(f"   Attempting recovery: navigating from home...")
+                                page.goto("https://ger.bmafidc.com.br/GER/Default.aspx")
+                                time.sleep(pause_seconds)
+                                navigate_to_proposta(page, pause_seconds=pause_seconds)
+                                print(f"✓ Recovered and back to Proposta list page")
+                            except Exception as recovery_error:
+                                print(f"❌ Recovery failed: {recovery_error}")
+                                raise  # Re-raise to trigger outer exception handler
 
                     except Exception as e:
                         print(f"\n❌ Error processing Proposta {record.PROPOSTA}: {e}")
                         import traceback
                         traceback.print_exc()
-                        # Try to go back to Proposta list page
+                        # Try to return to Proposta list page
                         try:
                             print(f"⬅ Attempting to return to Proposta list page...")
-                            page.go_back()
-                            time.sleep(pause_seconds)
-                        except Exception as back_error:
-                            print(f"⚠ Could not go back: {back_error}")
+                            navigate_to_proposta(page, pause_seconds=pause_seconds)
+                            print(f"✓ Returned to Proposta list page")
+                        except Exception as nav_error:
+                            print(f"⚠ Could not navigate back: {nav_error}")
+                            # Try recovery
+                            try:
+                                print(f"   Attempting recovery: navigating from home...")
+                                page.goto("https://ger.bmafidc.com.br/GER/Default.aspx")
+                                time.sleep(pause_seconds)
+                                navigate_to_proposta(page, pause_seconds=pause_seconds)
+                                print(f"✓ Recovered and back to Proposta list page")
+                            except Exception as recovery_error:
+                                print(f"❌ Recovery failed: {recovery_error}")
+                                # Continue to next proposal anyway
                         continue
 
                 print(f"\n{'='*80}")
