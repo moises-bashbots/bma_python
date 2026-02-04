@@ -452,5 +452,9 @@ def api_all_proposals():
         conn.close()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # This is only used for development
+    # In production, use: gunicorn -c gunicorn_config.py slack_integration_alerts.dashboard.app:app
+    import os
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode)
 
