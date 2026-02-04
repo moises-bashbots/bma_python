@@ -32,7 +32,7 @@ proc_name = "apr_dashboard"
 
 # Server mechanics
 daemon = False  # systemd will manage daemonization
-pidfile = "/var/run/apr_dashboard.pid"
+pidfile = "/tmp/apr_dashboard.pid"
 umask = 0o007
 user = None  # Run as current user (robot)
 group = None

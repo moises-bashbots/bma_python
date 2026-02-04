@@ -4,14 +4,14 @@ After=network.target mariadb.service
 Wants=mariadb.service
 
 [Service]
-Type=notify
+Type=simple
 User=robot
 Group=robot
 WorkingDirectory=/home/robot/Dev/bma_python
 Environment="PATH=/home/robot/Dev/bma_python/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 
 # Use uv to run gunicorn with the virtual environment
-ExecStart=/usr/local/bin/uv run gunicorn \
+ExecStart=/usr/bin/uv run gunicorn \
     --config /home/robot/Dev/bma_python/slack_integration_alerts/dashboard/gunicorn_config.py \
     --chdir /home/robot/Dev/bma_python \
     slack_integration_alerts.dashboard.app:app
@@ -28,8 +28,8 @@ RestartSec=10
 # Security
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/log/apr_dashboard /var/run
+ProtectHome=false
+ReadWritePaths=/var/log/apr_dashboard /tmp /home/robot/.cache/uv
 
 # Logging
 StandardOutput=journal
