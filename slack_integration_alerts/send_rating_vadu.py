@@ -757,8 +757,10 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                                 page.wait_for_load_state("domcontentloaded", timeout=15000)
                                                                 time.sleep(2)
                                                                 print(f"✓ Page processed after Processar")
-                                                            except PlaywrightTimeout:
-                                                                print(f"⚠️  Page unresponsive after clicking 'Processar' (15+ seconds)")
+                                                            except (PlaywrightTimeout, Exception) as timeout_error:
+                                                                # Catch both timeout and any other errors (DNS errors, connection errors, etc.)
+                                                                error_type = "timeout" if isinstance(timeout_error, PlaywrightTimeout) else "error"
+                                                                print(f"⚠️  Page unresponsive after clicking 'Processar' ({error_type}: {timeout_error})")
                                                                 print(f"   Closing browser and restarting process...")
 
                                                                 # Close browser
@@ -776,7 +778,7 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
 
                                                                 # Restart the entire process by calling this function recursively
                                                                 print(f"\n{'='*80}")
-                                                                print(f"RESTARTING PROCESS DUE TO TIMEOUT")
+                                                                print(f"RESTARTING PROCESS DUE TO {error_type.upper()}")
                                                                 print(f"{'='*80}\n")
 
                                                                 # Wait a bit before restarting
