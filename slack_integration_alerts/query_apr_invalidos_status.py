@@ -1210,8 +1210,8 @@ def query_valid_records_with_status_filter(session, target_date, invalid_record_
     print("QUERYING VALID RECORDS WITH STATUS FILTER")
     print("=" * 140)
 
-    # Query all records again (same as before)
-    query = session.query(
+    # Query 1: Records WITH NFEChave
+    query_with_nfe = session.query(
         APRCapa.GERENTE,
         APRCapa.NUMERO.label('PROPOSTA'),
         APRCapa.DATA,
@@ -1241,7 +1241,66 @@ def query_valid_records_with_status_filter(session, target_date, invalid_record_
         APRTitulos.NFEChave != ''
     ).distinct()
 
-    results = query.all()
+    results_with_nfe = query_with_nfe.all()
+    print(f"Found {len(results_with_nfe)} records with NFEChave")
+
+    # Query 2: Records WITHOUT NFEChave but with specific product types
+    # These products don't require NFE validation
+    specific_products = [
+        'INTERCIA NFSE',
+        'NF SERV. BMA SEC.',
+        'CAPITAL DE GIRO NP',
+        'NF SERV. PRE-IMPR. BMA FIDC',
+        'NF SERV. BMA FIDC',
+        'CCB',
+        'CONVENCIONAL BMA FIDC',
+    ]
+
+    query_without_nfe = session.query(
+        APRCapa.GERENTE,
+        APRCapa.NUMERO.label('PROPOSTA'),
+        APRCapa.DATA,
+        APRCapa.CEDENTE,
+        APRCapa.empresa,
+        APRCapa.status_atual.label('STATUS'),
+        APRCapa.QTD_APROVADOS,
+        APRCapa.VLR_APROVADOS,
+        Cedente.ramo.label('RAMO'),
+        APRTitulos.SEUNO,
+        APRTitulos.TITULO.label('DUPLICATA'),
+        APRTitulos.NFEChave,
+        APRTitulos.VALOR,
+        Cedente.apelido
+    ).join(
+        APRTitulos,
+        and_(
+            APRCapa.DATA == APRTitulos.DATA,
+            APRCapa.NUMERO == APRTitulos.NUMERO
+        )
+    ).join(
+        Cedente,
+        APRCapa.CEDENTE == Cedente.apelido
+    ).join(
+        ProdutoCedente,
+        APRTitulos.id_produto == ProdutoCedente.Id
+    ).join(
+        Produto,
+        ProdutoCedente.IdProdutoAtributo == Produto.Id
+    ).filter(
+        cast(APRCapa.DATA, Date) == target_date,
+        or_(
+            APRTitulos.NFEChave.is_(None),
+            APRTitulos.NFEChave == ''
+        ),
+        Produto.Descritivo.in_(specific_products)
+    ).distinct()
+
+    results_without_nfe = query_without_nfe.all()
+    print(f"Found {len(results_without_nfe)} records with specific products (no NFEChave required)")
+
+    # Combine both result sets
+    results = list(results_with_nfe) + list(results_without_nfe)
+    print(f"Total records to process: {len(results)}")
 
     # Filter out invalid records and apply status filter
     valid_records = []
