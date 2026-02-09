@@ -777,8 +777,8 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
 
                                                             # SIMPLIFIED APPROACH: Always close browser and restart after clicking Processar
                                                             # This avoids issues with unresponsive pages, DNS errors, etc.
-                                                            print(f"   Waiting 3 seconds...")
-                                                            time.sleep(3)
+                                                            print(f"   Waiting 5 seconds...")
+                                                            time.sleep(5)
 
                                                             print(f"   Closing browser and restarting process...")
 
