@@ -749,50 +749,43 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                             processar_button.click()
                                                             print(f"✓ Clicked 'Processar' button")
 
-                                                            # Wait for page to process with timeout detection
-                                                            print(f"   Waiting for page to process (15 second timeout)...")
-                                                            try:
-                                                                time.sleep(3)
-                                                                # Use 15 second timeout as requested
-                                                                page.wait_for_load_state("domcontentloaded", timeout=15000)
-                                                                time.sleep(2)
-                                                                print(f"✓ Page processed after Processar")
-                                                            except (PlaywrightTimeout, Exception) as timeout_error:
-                                                                # Catch both timeout and any other errors (DNS errors, connection errors, etc.)
-                                                                error_type = "timeout" if isinstance(timeout_error, PlaywrightTimeout) else "error"
-                                                                print(f"⚠️  Page unresponsive after clicking 'Processar' ({error_type}: {timeout_error})")
-                                                                print(f"   Closing browser and restarting process...")
+                                                            # SIMPLIFIED APPROACH: Always close browser and restart after clicking Processar
+                                                            # This avoids issues with unresponsive pages, DNS errors, etc.
+                                                            print(f"   Waiting 3 seconds...")
+                                                            time.sleep(3)
 
-                                                                # Close browser
+                                                            print(f"   Closing browser and restarting process...")
+
+                                                            # Close browser
+                                                            try:
+                                                                browser.close()
+                                                            except:
+                                                                pass
+
+                                                            # Close database session
+                                                            if session:
                                                                 try:
-                                                                    browser.close()
+                                                                    session.close()
                                                                 except:
                                                                     pass
 
-                                                                # Close database session
-                                                                if session:
-                                                                    try:
-                                                                        session.close()
-                                                                    except:
-                                                                        pass
+                                                            # Restart the entire process by calling this function recursively
+                                                            print(f"\n{'='*80}")
+                                                            print(f"RESTARTING PROCESS AFTER CLICKING PROCESSAR")
+                                                            print(f"{'='*80}\n")
 
-                                                                # Restart the entire process by calling this function recursively
-                                                                print(f"\n{'='*80}")
-                                                                print(f"RESTARTING PROCESS DUE TO {error_type.upper()}")
-                                                                print(f"{'='*80}\n")
+                                                            # Wait a bit before restarting
+                                                            time.sleep(5)
 
-                                                                # Wait a bit before restarting
-                                                                time.sleep(5)
-
-                                                                # Recursive call to restart
-                                                                return send_rating_vadu(
-                                                                    rating_group=rating_group,
-                                                                    headless=headless,
-                                                                    dry_run=dry_run,
-                                                                    pause_seconds=pause_seconds,
-                                                                    final_pause=final_pause,
-                                                                    target_date=target_date
-                                                                )
+                                                            # Recursive call to restart
+                                                            return send_rating_vadu(
+                                                                rating_group=rating_group,
+                                                                headless=headless,
+                                                                dry_run=dry_run,
+                                                                pause_seconds=pause_seconds,
+                                                                final_pause=final_pause,
+                                                                target_date=target_date
+                                                            )
                                                         else:
                                                             print(f"❌ Could not find 'Processar' button after Grava")
                                                     else:
