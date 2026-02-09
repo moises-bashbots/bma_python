@@ -780,7 +780,7 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                             print(f"   Waiting 15 seconds...")
                                                             time.sleep(15)
 
-                                                            print(f"   Closing browser and restarting process...")
+                                                            print(f"   Closing browser and exiting Playwright context...")
 
                                                             # Close browser
                                                             try:
@@ -795,7 +795,7 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                                 except:
                                                                     pass
 
-                                                            # Restart the entire process by calling this function recursively
+                                                            # Exit the Playwright context and restart
                                                             print(f"\n{'='*80}")
                                                             print(f"RESTARTING PROCESS AFTER CLICKING PROCESSAR")
                                                             print(f"{'='*80}\n")
@@ -803,15 +803,9 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                             # Wait a bit before restarting
                                                             time.sleep(5)
 
-                                                            # Recursive call to restart
-                                                            return send_rating_vadu(
-                                                                rating_group=rating_group,
-                                                                headless=headless,
-                                                                dry_run=dry_run,
-                                                                pause_seconds=pause_seconds,
-                                                                final_pause=final_pause,
-                                                                target_date=target_date
-                                                            )
+                                                            # Return a special value to indicate restart is needed
+                                                            # This will exit the 'with sync_playwright()' context
+                                                            return 'RESTART_NEEDED'
                                                         else:
                                                             print(f"❌ Could not find 'Processar' button after Grava")
                                                     else:
@@ -1041,13 +1035,17 @@ def main():
                 print(f"LOOP ITERATION {iteration}")
                 print(f"{'=' * 80}\n")
 
-                success = send_rating_vadu(
-                    rating_group=args.rating_group,
-                    headless=headless,
-                    dry_run=args.dry_run,
-                    pause_seconds=args.pause,
-                    final_pause=args.final_pause
-                )
+                # Keep restarting if needed
+                while True:
+                    result = send_rating_vadu(
+                        rating_group=args.rating_group,
+                        headless=headless,
+                        dry_run=args.dry_run,
+                        pause_seconds=args.pause,
+                        final_pause=args.final_pause
+                    )
+                    if result != 'RESTART_NEEDED':
+                        break  # Exit restart loop
 
                 iteration += 1
 
@@ -1062,13 +1060,18 @@ def main():
                 print("=" * 80)
                 sys.exit(0)
     else:
-        success = send_rating_vadu(
-            rating_group=args.rating_group,
-            headless=headless,
-            dry_run=args.dry_run,
-            pause_seconds=args.pause,
-            final_pause=args.final_pause
-        )
+        # Keep restarting if needed
+        while True:
+            result = send_rating_vadu(
+                rating_group=args.rating_group,
+                headless=headless,
+                dry_run=args.dry_run,
+                pause_seconds=args.pause,
+                final_pause=args.final_pause
+            )
+            if result != 'RESTART_NEEDED':
+                success = result
+                break  # Exit restart loop
 
         # Exit with appropriate code
         sys.exit(0 if success else 1)
