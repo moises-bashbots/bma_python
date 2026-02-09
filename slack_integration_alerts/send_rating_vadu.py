@@ -749,6 +749,32 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                             processar_button.click()
                                                             print(f"✓ Clicked 'Processar' button")
 
+                                                            # Mark as processed in database BEFORE restarting browser
+                                                            if not dry_run and session:
+                                                                # Retry logic for database update (in case of concurrent updates)
+                                                                max_retries = 3
+                                                                retry_delay = 1  # seconds
+
+                                                                for attempt in range(max_retries):
+                                                                    try:
+                                                                        # Refresh the record to avoid stale data
+                                                                        session.refresh(record)
+                                                                        record.is_processado = 1
+                                                                        record.is_bot_processed = 1  # Bot clicked Processar
+                                                                        session.commit()
+                                                                        print(f"✓ Marked Proposta {record.PROPOSTA} as processed in database (is_bot_processed=1)")
+                                                                        break  # Success, exit retry loop
+                                                                    except Exception as e:
+                                                                        session.rollback()
+                                                                        if attempt < max_retries - 1:
+                                                                            print(f"⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
+                                                                            print(f"  Waiting {retry_delay}s before retry...")
+                                                                            time.sleep(retry_delay)
+                                                                        else:
+                                                                            print(f"❌ Could not mark as processed after {max_retries} attempts: {e}")
+                                                            else:
+                                                                print(f"[DRY RUN] Would mark Proposta {record.PROPOSTA} as processed (is_bot_processed=1)")
+
                                                             # SIMPLIFIED APPROACH: Always close browser and restart after clicking Processar
                                                             # This avoids issues with unresponsive pages, DNS errors, etc.
                                                             print(f"   Waiting 3 seconds...")
@@ -796,32 +822,6 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                 print(f"❌ Error in Altera → Grava → Processar workflow: {e}")
                                                 import traceback
                                                 traceback.print_exc()
-
-                                            # Mark as processed in database if not dry run
-                                            if not dry_run and session:
-                                                # Retry logic for database update (in case of concurrent updates)
-                                                max_retries = 3
-                                                retry_delay = 1  # seconds
-
-                                                for attempt in range(max_retries):
-                                                    try:
-                                                        # Refresh the record to avoid stale data
-                                                        session.refresh(record)
-                                                        record.is_processado = 1
-                                                        record.is_bot_processed = 1  # Bot clicked Processar
-                                                        session.commit()
-                                                        print(f"✓ Marked Proposta {record.PROPOSTA} as processed in database (is_bot_processed=1)")
-                                                        break  # Success, exit retry loop
-                                                    except Exception as e:
-                                                        session.rollback()
-                                                        if attempt < max_retries - 1:
-                                                            print(f"⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
-                                                            print(f"  Waiting {retry_delay}s before retry...")
-                                                            time.sleep(retry_delay)
-                                                        else:
-                                                            print(f"❌ Could not mark as processed after {max_retries} attempts: {e}")
-                                            else:
-                                                print(f"[DRY RUN] Would mark Proposta {record.PROPOSTA} as processed (is_bot_processed=1)")
                                         else:
                                             # Button value is not "Processar", just mark as processed
                                             print(f"⚠ Button value is '{button_value}' (not 'Processar'), skipping click")
