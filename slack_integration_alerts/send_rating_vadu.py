@@ -915,9 +915,8 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                         config = load_config()
                         mssql_config = config['databases']['mssql']
                         mssql_connection_string = (
-                            f"mssql+pyodbc://{mssql_config['user']}:{mssql_config['password']}"
-                            f"@{mssql_config['server']}/{mssql_config['scheme']}"
-                            f"?driver=ODBC+Driver+17+for+SQL+Server"
+                            f"mssql+pymssql://{mssql_config['user']}:{mssql_config['password']}"
+                            f"@{mssql_config['server']}:{mssql_config['port']}/{mssql_config['scheme']}"
                         )
                         mssql_engine = create_engine(mssql_connection_string)
                         MSSQLSession = sessionmaker(bind=mssql_engine)
