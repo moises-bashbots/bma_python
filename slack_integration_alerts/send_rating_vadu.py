@@ -90,6 +90,355 @@ def get_todays_valid_records(session, target_date=None):
     return records
 
 
+def get_records_needing_confirmation(session, target_date=None):
+    """
+    Query records that were processed but not yet confirmed in GER system.
+
+    These are records where:
+    - is_processado = 1 (bot opened and checked the record)
+    - is_confirmado = 0 (not yet confirmed that GER shows "Reprocessar")
+
+    Args:
+        session: SQLAlchemy session
+        target_date: Date to query (default: today)
+
+    Returns:
+        List of APRValidRecord objects needing confirmation
+    """
+    if target_date is None:
+        target_date = date.today()
+
+    records = session.query(APRValidRecord).filter(
+        APRValidRecord.DATA == target_date,
+        APRValidRecord.is_processado == 1,
+        APRValidRecord.is_confirmado == 0
+    ).order_by(
+        APRValidRecord.PROPOSTA.asc()
+    ).all()
+
+    return records
+
+
+def confirm_processed_records(rating_group="RATING A", headless=True, dry_run=False, pause_seconds=2, final_pause=10, target_date=None):
+    """
+    Confirmation phase: Verify that processed records are actually processed in GER system.
+
+    This function runs when there are no unprocessed records (is_processado = 0).
+    It checks records where is_processado = 1 AND is_confirmado = 0.
+
+    For each record:
+    - Opens proposal details
+    - Selects the appropriate rating
+    - Checks the button value:
+      * If button shows "Reprocessar" (or != "Processar"): Mark as confirmed (is_confirmado = 1)
+      * If button shows "Processar": Execute full workflow and mark is_bot_processed = 1
+
+    Args:
+        rating_group: Rating group to select
+        headless: Run browser in headless mode
+        dry_run: If True, only navigate but don't make changes
+        pause_seconds: Seconds to pause between steps
+        final_pause: Seconds to pause at the end before closing browser
+        target_date: Date to query records for (default: today)
+
+    Returns:
+        True if successful, 'RESTART_NEEDED' if browser restart is needed
+    """
+    print("=" * 80)
+    print("CONFIRMATION PHASE - Verify Processed Records")
+    print("=" * 80)
+
+    if dry_run:
+        print("🔍 DRY RUN MODE - No changes will be made")
+
+    print(f"Rating Group: {rating_group}")
+    print(f"Headless Mode: {headless}")
+    print(f"Pause between steps: {pause_seconds} seconds")
+
+    if target_date is None:
+        target_date = date.today()
+    print(f"Target Date: {target_date}")
+    print("=" * 80)
+    print()
+
+    # Query database for records needing confirmation
+    print("Querying database for records needing confirmation...")
+    try:
+        session = create_mariadb_session()
+        confirmation_records = get_records_needing_confirmation(session, target_date)
+        print(f"✓ Found {len(confirmation_records)} records needing confirmation")
+
+        if len(confirmation_records) > 0:
+            print("\nRecords to confirm:")
+            for record in confirmation_records[:10]:
+                print(f"  - Proposta {record.PROPOSTA}: {record.CEDENTE} ({record.RAMO}) - {record.STATUS}")
+            if len(confirmation_records) > 10:
+                print(f"  ... and {len(confirmation_records) - 10} more")
+        else:
+            print("\n✓ No records need confirmation")
+            print("=" * 80)
+            if session:
+                session.close()
+            return True
+        print()
+    except Exception as e:
+        print(f"⚠ Warning: Could not query database: {e}")
+        if session:
+            session.close()
+        return False
+
+    # Launch browser to confirm records
+    with sync_playwright() as p:
+        print(f"\n🌐 Launching browser (headless={headless})...")
+        browser = p.chromium.launch(headless=headless)
+        context = browser.new_context(
+            viewport={'width': 1443, 'height': 1705}
+        )
+        page = context.new_page()
+        print(f"✓ Browser launched successfully!")
+
+        try:
+            # Login and navigate to Proposta page
+            login_to_ger(page, pause_seconds=pause_seconds)
+            navigate_to_proposta(page, pause_seconds=pause_seconds)
+
+            # Read visible proposals from the web table
+            print(f"\n📖 Reading visible proposals from web table...")
+            headers, web_proposals = read_proposals_table(page, save_html=False)
+            print(f"✓ Found {len(web_proposals)} visible proposals in the table")
+
+            # Extract proposal numbers from web table
+            # The proposal number is typically in column 3 (0-indexed), not column 0
+            visible_proposal_numbers = set()
+            for row_idx, row in enumerate(web_proposals):
+                if len(row) > 3:  # Make sure we have enough columns
+                    try:
+                        # Try to extract proposal number from column 3 (same as click_proposal_spectacles)
+                        proposal_num = int(row[3])
+                        visible_proposal_numbers.add(proposal_num)
+                        if row_idx < 3:  # Debug: show first 3 rows
+                            print(f"  DEBUG: Row {row_idx}: columns={len(row)}, proposal_num={proposal_num}")
+                    except (ValueError, IndexError) as e:
+                        # Skip rows that don't have valid proposal numbers
+                        if row_idx < 3:  # Debug: show first 3 rows
+                            print(f"  DEBUG: Row {row_idx}: Could not extract proposal number - {e}")
+                        continue
+
+            print(f"✓ Extracted {len(visible_proposal_numbers)} proposal numbers from visible table")
+            if len(visible_proposal_numbers) > 0:
+                print(f"  Sample visible proposals: {sorted(list(visible_proposal_numbers))[:10]}")
+
+            # Filter confirmation records to only include visible proposals
+            print(f"\n🔍 Filtering confirmation records...")
+            print(f"   Database records needing confirmation: {[r.PROPOSTA for r in confirmation_records[:20]]}")
+            print(f"   Visible proposals in table: {sorted(list(visible_proposal_numbers))[:20]}")
+
+            visible_confirmation_records = [
+                record for record in confirmation_records
+                if record.PROPOSTA in visible_proposal_numbers
+            ]
+
+            invisible_confirmation_records = [
+                record for record in confirmation_records
+                if record.PROPOSTA not in visible_proposal_numbers
+            ]
+
+            # Mark invisible proposals as confirmed (they're likely already processed/archived)
+            if len(invisible_confirmation_records) > 0 and not dry_run and session:
+                print(f"\n📝 Marking {len(invisible_confirmation_records)} invisible proposals as confirmed...")
+                print(f"   (These proposals are not in the table, likely already processed/archived)")
+
+                from sqlalchemy import text
+
+                for record in invisible_confirmation_records:
+                    max_retries = 3
+                    retry_delay = 1
+
+                    for attempt in range(max_retries):
+                        try:
+                            update_sql = text("""
+                                UPDATE apr_valid_records
+                                SET is_confirmado = 1
+                                WHERE DATA = :data
+                                AND PROPOSTA = :proposta
+                                AND CEDENTE = :cedente
+                                AND RAMO = :ramo
+                            """)
+                            session.execute(update_sql, {
+                                'data': record.DATA,
+                                'proposta': record.PROPOSTA,
+                                'cedente': record.CEDENTE,
+                                'ramo': record.RAMO
+                            })
+                            session.commit()
+                            print(f"   ✓ Proposta {record.PROPOSTA} ({record.CEDENTE}) marked as confirmed (not in table)")
+                            break
+                        except Exception as e:
+                            session.rollback()
+                            if attempt < max_retries - 1:
+                                print(f"   ⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
+                                time.sleep(retry_delay)
+                            else:
+                                print(f"   ❌ Could not mark Proposta {record.PROPOSTA} as confirmed after {max_retries} attempts: {e}")
+
+            if len(visible_confirmation_records) == 0:
+                print(f"\n⚠ None of the {len(confirmation_records)} records needing confirmation are visible in the table")
+                print(f"   Total visible proposals: {len(visible_proposal_numbers)}")
+                print(f"   Total records needing confirmation: {len(confirmation_records)}")
+                print(f"   Invisible records marked as confirmed: {len(invisible_confirmation_records)}")
+                print(f"\n✓ Nothing to confirm in table - closing browser")
+                if session:
+                    session.close()
+                browser.close()
+                return True
+
+            print(f"\n✓ Found {len(visible_confirmation_records)} records that are both visible AND need confirmation")
+            print(f"   (Out of {len(confirmation_records)} total records needing confirmation)")
+            if len(invisible_confirmation_records) > 0:
+                print(f"   ({len(invisible_confirmation_records)} invisible records already marked as confirmed)")
+
+            # Process each visible confirmation record
+            print(f"\n📋 Confirming {len(visible_confirmation_records)} visible proposals...")
+
+            for idx, record in enumerate(visible_confirmation_records, 1):
+                try:
+                    print(f"\n{'='*80}")
+                    print(f"Confirming {idx}/{len(visible_confirmation_records)}: Proposta {record.PROPOSTA} - {record.CEDENTE}")
+                    print(f"{'='*80}")
+
+                    # Click spectacles to open proposal details
+                    print(f"\n🔍 Opening proposal details...")
+                    success = click_proposal_spectacles(page, record.PROPOSTA, pause_seconds=pause_seconds)
+
+                    if not success:
+                        print(f"❌ Failed to open Proposta {record.PROPOSTA} details. Skipping...")
+                        continue
+
+                    # Wait for page to load
+                    time.sleep(1)
+
+                    # Extract usuario from dropdown during confirmation
+                    print(f"\n📋 Extracting usuario from dropdown...")
+                    usuario_confirmar = None
+                    try:
+                        usuario_dropdown = page.query_selector('input#ctl00_contentManager_ddlusuario_I')
+                        if usuario_dropdown:
+                            usuario_confirmar = usuario_dropdown.get_attribute('value')
+                            print(f"✓ Usuario extracted: {usuario_confirmar}")
+                        else:
+                            print(f"⚠ Usuario dropdown not found")
+                    except Exception as e:
+                        print(f"⚠ Error extracting usuario: {e}")
+
+                    # Check the button value (read-only verification)
+                    print(f"\n🔘 Checking button value...")
+                    try:
+                        processar_button = page.query_selector('input[name="ctl00$contentManager$btVaduMDProcessa"]')
+
+                        if processar_button:
+                            button_value = processar_button.get_attribute('value')
+                            print(f"   Button value: '{button_value}'")
+
+                            if button_value == "Processar":
+                                # Button shows "Processar" - previous processing failed
+                                # Reset the record so it will be reprocessed in the next normal run
+                                print(f"⚠ Button shows 'Processar' - previous processing incomplete")
+                                print(f"🔄 Resetting record for reprocessing (is_processado=0, is_bot_processed=0)")
+
+                                if not dry_run and session:
+                                    try:
+                                        # Use raw SQL UPDATE to avoid ORM optimistic locking issues
+                                        from sqlalchemy import text
+                                        update_sql = text("""
+                                            UPDATE apr_valid_records
+                                            SET is_processado = 0, is_bot_processed = 0
+                                            WHERE DATA = :data
+                                            AND PROPOSTA = :proposta
+                                            AND CEDENTE = :cedente
+                                            AND RAMO = :ramo
+                                        """)
+                                        session.execute(update_sql, {
+                                            'data': record.DATA,
+                                            'proposta': record.PROPOSTA,
+                                            'cedente': record.CEDENTE,
+                                            'ramo': record.RAMO
+                                        })
+                                        session.commit()
+                                        print(f"✓ Reset Proposta {record.PROPOSTA} - will be reprocessed in next run")
+                                    except Exception as e:
+                                        print(f"⚠ Error resetting record: {e}")
+                                        session.rollback()
+                                else:
+                                    print(f"[DRY RUN] Would reset record for reprocessing")
+                            else:
+                                # Button shows "Reprocessar" or other value - confirmed processed
+                                print(f"✓ Button shows '{button_value}' - proposal is confirmed processed in GER")
+
+                                if not dry_run and session:
+                                    # Use raw SQL UPDATE with retry logic to avoid ORM optimistic locking issues
+                                    from sqlalchemy import text
+
+                                    max_retries = 3
+                                    retry_delay = 1  # seconds
+
+                                    for attempt in range(max_retries):
+                                        try:
+                                            update_sql = text("""
+                                                UPDATE apr_valid_records
+                                                SET is_confirmado = 1,
+                                                    usuario_confirmar = :usuario_confirmar
+                                                WHERE DATA = :data
+                                                AND PROPOSTA = :proposta
+                                                AND CEDENTE = :cedente
+                                                AND RAMO = :ramo
+                                            """)
+                                            session.execute(update_sql, {
+                                                'usuario_confirmar': usuario_confirmar,
+                                                'data': record.DATA,
+                                                'proposta': record.PROPOSTA,
+                                                'cedente': record.CEDENTE,
+                                                'ramo': record.RAMO
+                                            })
+                                            session.commit()
+                                            print(f"✓ Marked Proposta {record.PROPOSTA} as confirmed (is_confirmado=1, usuario={usuario_confirmar})")
+                                            break  # Success, exit retry loop
+                                        except Exception as e:
+                                            session.rollback()
+                                            if attempt < max_retries - 1:
+                                                print(f"⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
+                                                print(f"  Waiting {retry_delay}s before retry...")
+                                                time.sleep(retry_delay)
+                                            else:
+                                                print(f"❌ Could not mark as confirmed after {max_retries} attempts: {e}")
+                                else:
+                                    print(f"[DRY RUN] Would mark as confirmed (usuario={usuario_confirmar})")
+                        else:
+                            print(f"❌ Could not find button")
+
+                    except Exception as e:
+                        print(f"❌ Error during confirmation: {e}")
+                        import traceback
+                        traceback.print_exc()
+
+                    # Return to Proposta list page
+                    print(f"\n⬅ Returning to Proposta list page...")
+                    navigate_to_proposta(page, pause_seconds=pause_seconds)
+
+                except Exception as e:
+                    print(f"❌ Error confirming Proposta {record.PROPOSTA}: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            print(f"\n✓ Confirmation phase complete")
+
+        finally:
+            if session:
+                session.close()
+            browser.close()
+
+    return True
+
+
 def login_to_ger(page, pause_seconds=2):
     """
     Login to the GER system.
@@ -536,11 +885,32 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                 print(f"  ... and {len(db_records) - 10} more")
         else:
             print("\n⚠ No unprocessed valid records found for today")
-            print("✓ Nothing to process - browser will not be opened")
-            print("=" * 80)
-            if session:
-                session.close()
-            return True  # Success - nothing to do
+
+            # Check if there are records needing confirmation
+            print("\n🔍 Checking for records needing confirmation...")
+            confirmation_records = get_records_needing_confirmation(session, target_date)
+
+            if len(confirmation_records) > 0:
+                print(f"✓ Found {len(confirmation_records)} records needing confirmation")
+                if session:
+                    session.close()
+
+                # Run confirmation phase
+                return confirm_processed_records(
+                    rating_group=rating_group,
+                    headless=headless,
+                    dry_run=dry_run,
+                    pause_seconds=pause_seconds,
+                    final_pause=final_pause,
+                    target_date=target_date
+                )
+            else:
+                print("✓ No records need confirmation either")
+                print("✓ Nothing to do - browser will not be opened")
+                print("=" * 80)
+                if session:
+                    session.close()
+                return True  # Success - nothing to do
         print()
     except Exception as e:
         print(f"⚠ Warning: Could not query database: {e}")
@@ -666,173 +1036,343 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                         print(f"   Button value: {button_value}")
 
                                         if button_value == "Processar":
-                                            # New workflow: Click Altera → Grava → Processar
-                                            print(f"\n🔘 Starting workflow: Altera → Grava → Processar")
+                                            # Check the dropdown value to decide workflow
+                                            print(f"\n🔘 Checking dropdown value (ddlusuario_I)...")
 
+                                            dropdown_value = None
                                             try:
-                                                # Step 1: Click on "Altera" button
-                                                print(f"\n🔘 Step 1: Looking for 'Altera' button...")
+                                                dropdown_element = page.query_selector('input#ctl00_contentManager_ddlusuario_I')
+                                                if dropdown_element:
+                                                    dropdown_value = dropdown_element.get_attribute('value')
+                                                    if dropdown_value:
+                                                        dropdown_value = dropdown_value.strip()
+                                                    print(f"   Dropdown value: '{dropdown_value if dropdown_value else '(empty)'}'")
+                                                else:
+                                                    print(f"   ⚠ Dropdown element not found")
+                                            except Exception as dropdown_error:
+                                                print(f"   ⚠ Error reading dropdown: {dropdown_error}")
 
-                                                # The Altera button is a div with id="ctl00_contentManager_BtAlteraFluxo_CD"
-                                                altera_selector = "div#ctl00_contentManager_BtAlteraFluxo_CD"
+                                            # Decide workflow based on dropdown value
+                                            if not dropdown_value:
+                                                # Dropdown is EMPTY - Execute full workflow: Altera → Grava → Processar
+                                                print(f"\n🔘 Dropdown is EMPTY - Starting FULL workflow: Altera → Grava → Processar")
 
-                                                # Wait for the Altera button to be visible
-                                                altera_button = page.wait_for_selector(
-                                                    altera_selector,
-                                                    timeout=30000,
-                                                    state="visible"
-                                                )
+                                                try:
+                                                    # Step 1: Click on "Altera" button
+                                                    print(f"\n🔘 Step 1: Looking for 'Altera' button...")
 
-                                                if altera_button:
-                                                    print(f"✓ Found 'Altera' button")
+                                                    # The Altera button is a div with id="ctl00_contentManager_BtAlteraFluxo_CD"
+                                                    altera_selector = "div#ctl00_contentManager_BtAlteraFluxo_CD"
 
-                                                    # Try to click normally first
-                                                    try:
-                                                        print(f"   Attempting normal click...")
-                                                        altera_button.click(timeout=5000)
-                                                        print(f"✓ Clicked 'Altera' button (normal click)")
-                                                    except Exception as click_error:
-                                                        # If normal click fails (e.g., due to overlay), try JavaScript click
-                                                        print(f"   Normal click failed: {click_error}")
-                                                        print(f"   Trying JavaScript click to bypass overlay...")
-                                                        page.evaluate(f'document.querySelector("{altera_selector}").click()')
-                                                        print(f"✓ Clicked 'Altera' button (JavaScript click)")
-
-                                                    # Wait for page to update after Altera
-                                                    print(f"   Waiting for page to update after Altera...")
-                                                    time.sleep(2)
-                                                    print(f"✓ Page updated after Altera")
-
-                                                    # Step 2: Click on "Grava" button
-                                                    print(f"\n🔘 Step 2: Looking for 'Grava' button...")
-
-                                                    # The Grava button is a div with id="ctl00_contentManager_BtGravaFluxo_CD"
-                                                    grava_selector = "div#ctl00_contentManager_BtGravaFluxo_CD"
-
-                                                    # Wait for the Grava button to be visible
-                                                    grava_button = page.wait_for_selector(
-                                                        grava_selector,
+                                                    # Wait for the Altera button to be visible
+                                                    altera_button = page.wait_for_selector(
+                                                        altera_selector,
                                                         timeout=30000,
                                                         state="visible"
                                                     )
 
-                                                    if grava_button:
-                                                        print(f"✓ Found 'Grava' button")
+                                                    if altera_button:
+                                                        print(f"✓ Found 'Altera' button")
 
                                                         # Try to click normally first
                                                         try:
                                                             print(f"   Attempting normal click...")
-                                                            grava_button.click(timeout=5000)
-                                                            print(f"✓ Clicked 'Grava' button (normal click)")
+                                                            altera_button.click(timeout=5000)
+                                                            print(f"✓ Clicked 'Altera' button (normal click)")
                                                         except Exception as click_error:
                                                             # If normal click fails (e.g., due to overlay), try JavaScript click
                                                             print(f"   Normal click failed: {click_error}")
                                                             print(f"   Trying JavaScript click to bypass overlay...")
-                                                            page.evaluate(f'document.querySelector("{grava_selector}").click()')
-                                                            print(f"✓ Clicked 'Grava' button (JavaScript click)")
+                                                            page.evaluate(f'document.querySelector("{altera_selector}").click()')
+                                                            print(f"✓ Clicked 'Altera' button (JavaScript click)")
 
-                                                        # Wait for loading after Grava
-                                                        print(f"   Waiting for page to finish loading after Grava...")
+                                                        # Wait for page to update after Altera
+                                                        print(f"   Waiting for page to update after Altera...")
                                                         time.sleep(2)
-                                                        page.wait_for_load_state("domcontentloaded", timeout=120000)
-                                                        page.wait_for_load_state("networkidle", timeout=120000)
-                                                        time.sleep(pause_seconds)
-                                                        print(f"✓ Page loaded after Grava")
+                                                        print(f"✓ Page updated after Altera")
 
-                                                        # Step 3: Click on "Processar" button with timeout detection
-                                                        print(f"\n🔘 Step 3: Clicking 'Processar' button...")
+                                                        # Step 2: Click on "Grava" button
+                                                        print(f"\n🔘 Step 2: Looking for 'Grava' button...")
 
-                                                        # Re-query the Processar button (page may have updated)
-                                                        processar_button = page.query_selector('input[name="ctl00$contentManager$btVaduMDProcessa"]')
+                                                        # The Grava button is a div with id="ctl00_contentManager_BtGravaFluxo_CD"
+                                                        grava_selector = "div#ctl00_contentManager_BtGravaFluxo_CD"
 
-                                                        if processar_button:
-                                                            processar_button.click()
-                                                            print(f"✓ Clicked 'Processar' button")
+                                                        # Wait for the Grava button to be visible
+                                                        grava_button = page.wait_for_selector(
+                                                            grava_selector,
+                                                            timeout=30000,
+                                                            state="visible"
+                                                        )
 
-                                                            # Mark as processed in database BEFORE restarting browser
-                                                            if not dry_run and session:
-                                                                # Retry logic for database update (in case of concurrent updates)
-                                                                max_retries = 3
-                                                                retry_delay = 1  # seconds
+                                                        if grava_button:
+                                                            print(f"✓ Found 'Grava' button")
 
-                                                                for attempt in range(max_retries):
-                                                                    try:
-                                                                        # Refresh the record to avoid stale data
-                                                                        session.refresh(record)
-                                                                        record.is_processado = 1
-                                                                        record.is_bot_processed = 1  # Bot clicked Processar
-                                                                        session.commit()
-                                                                        print(f"✓ Marked Proposta {record.PROPOSTA} as processed in database (is_bot_processed=1)")
-                                                                        break  # Success, exit retry loop
-                                                                    except Exception as e:
-                                                                        session.rollback()
-                                                                        if attempt < max_retries - 1:
-                                                                            print(f"⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
-                                                                            print(f"  Waiting {retry_delay}s before retry...")
-                                                                            time.sleep(retry_delay)
-                                                                        else:
-                                                                            print(f"❌ Could not mark as processed after {max_retries} attempts: {e}")
-                                                            else:
-                                                                print(f"[DRY RUN] Would mark Proposta {record.PROPOSTA} as processed (is_bot_processed=1)")
-
-                                                            # SIMPLIFIED APPROACH: Always close browser and restart after clicking Processar
-                                                            # This avoids issues with unresponsive pages, DNS errors, etc.
-                                                            print(f"   Waiting 15 seconds...")
-                                                            time.sleep(15)
-
-                                                            print(f"   Closing browser and exiting Playwright context...")
-
-                                                            # Close browser
+                                                            # Try to click normally first
                                                             try:
-                                                                browser.close()
-                                                            except:
-                                                                pass
+                                                                print(f"   Attempting normal click...")
+                                                                grava_button.click(timeout=5000)
+                                                                print(f"✓ Clicked 'Grava' button (normal click)")
+                                                            except Exception as click_error:
+                                                                # If normal click fails (e.g., due to overlay), try JavaScript click
+                                                                print(f"   Normal click failed: {click_error}")
+                                                                print(f"   Trying JavaScript click to bypass overlay...")
+                                                                page.evaluate(f'document.querySelector("{grava_selector}").click()')
+                                                                print(f"✓ Clicked 'Grava' button (JavaScript click)")
 
-                                                            # Close database session
-                                                            if session:
+                                                            # Wait for loading after Grava
+                                                            print(f"   Waiting for page to finish loading after Grava...")
+                                                            time.sleep(2)
+                                                            page.wait_for_load_state("domcontentloaded", timeout=120000)
+                                                            page.wait_for_load_state("networkidle", timeout=120000)
+                                                            time.sleep(pause_seconds)
+                                                            print(f"✓ Page loaded after Grava")
+
+                                                            # Step 3: Extract usuario from dropdown BEFORE clicking Processar
+                                                            print(f"\n📋 Extracting usuario from dropdown...")
+                                                            usuario_processar = None
+                                                            try:
+                                                                usuario_dropdown = page.query_selector('input#ctl00_contentManager_ddlusuario_I')
+                                                                if usuario_dropdown:
+                                                                    usuario_processar = usuario_dropdown.get_attribute('value')
+                                                                    print(f"✓ Usuario extracted: {usuario_processar}")
+                                                                else:
+                                                                    print(f"⚠ Usuario dropdown not found")
+                                                            except Exception as e:
+                                                                print(f"⚠ Error extracting usuario: {e}")
+
+                                                            # Step 4: Click on "Processar" button with timeout detection
+                                                            print(f"\n🔘 Step 4: Clicking 'Processar' button...")
+
+                                                            # Re-query the Processar button (page may have updated)
+                                                            processar_button = page.query_selector('input[name="ctl00$contentManager$btVaduMDProcessa"]')
+
+                                                            if processar_button:
+                                                                processar_button.click()
+                                                                print(f"✓ Clicked 'Processar' button")
+
+                                                                # Mark as processed in database BEFORE restarting browser
+                                                                if not dry_run and session:
+                                                                    # Use raw SQL UPDATE to avoid ORM optimistic locking issues
+                                                                    from sqlalchemy import text
+
+                                                                    max_retries = 3
+                                                                    retry_delay = 1  # seconds
+
+                                                                    for attempt in range(max_retries):
+                                                                        try:
+                                                                            update_sql = text("""
+                                                                                UPDATE apr_valid_records
+                                                                                SET is_processado = 1,
+                                                                                    is_bot_processed = 1,
+                                                                                    rating_selecionado = :rating_value,
+                                                                                    usuario_processar = :usuario_processar
+                                                                                WHERE DATA = :data
+                                                                                  AND PROPOSTA = :proposta
+                                                                                  AND CEDENTE = :cedente
+                                                                                  AND RAMO = :ramo
+                                                                            """)
+                                                                            session.execute(update_sql, {
+                                                                                'rating_value': rating_value,
+                                                                                'usuario_processar': usuario_processar,
+                                                                                'data': record.DATA,
+                                                                                'proposta': record.PROPOSTA,
+                                                                                'cedente': record.CEDENTE,
+                                                                                'ramo': record.RAMO
+                                                                            })
+                                                                            session.commit()
+                                                                            print(f"✓ Marked Proposta {record.PROPOSTA} as processed (is_bot_processed=1, rating={rating_value}, usuario={usuario_processar})")
+                                                                            break  # Success, exit retry loop
+                                                                        except Exception as e:
+                                                                            session.rollback()
+                                                                            if attempt < max_retries - 1:
+                                                                                print(f"⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
+                                                                                print(f"  Waiting {retry_delay}s before retry...")
+                                                                                time.sleep(retry_delay)
+                                                                            else:
+                                                                                print(f"❌ Could not mark as processed after {max_retries} attempts: {e}")
+                                                                else:
+                                                                    print(f"[DRY RUN] Would mark Proposta {record.PROPOSTA} as processed (is_bot_processed=1, rating={rating_value}, usuario={usuario_processar})")
+
+                                                                # SIMPLIFIED APPROACH: Always close browser and restart after clicking Processar
+                                                                # This avoids issues with unresponsive pages, DNS errors, etc.
+                                                                print(f"   Waiting 15 seconds...")
+                                                                time.sleep(15)
+
+                                                                print(f"   Closing browser and exiting Playwright context...")
+
+                                                                # Close browser
                                                                 try:
-                                                                    session.close()
+                                                                    browser.close()
                                                                 except:
                                                                     pass
 
-                                                            # Exit the Playwright context and restart
-                                                            print(f"\n{'='*80}")
-                                                            print(f"RESTARTING PROCESS AFTER CLICKING PROCESSAR")
-                                                            print(f"{'='*80}\n")
+                                                                # Close database session
+                                                                if session:
+                                                                    try:
+                                                                        session.close()
+                                                                    except:
+                                                                        pass
 
-                                                            # Wait a bit before restarting
-                                                            time.sleep(5)
+                                                                # Exit the Playwright context and restart
+                                                                print(f"\n{'='*80}")
+                                                                print(f"RESTARTING PROCESS AFTER CLICKING PROCESSAR")
+                                                                print(f"{'='*80}\n")
 
-                                                            # Return a special value to indicate restart is needed
-                                                            # This will exit the 'with sync_playwright()' context
-                                                            return 'RESTART_NEEDED'
+                                                                # Wait a bit before restarting
+                                                                time.sleep(5)
+
+                                                                # Return a special value to indicate restart is needed
+                                                                # This will exit the 'with sync_playwright()' context
+                                                                return 'RESTART_NEEDED'
+                                                            else:
+                                                                print(f"❌ Could not find 'Processar' button after Grava")
                                                         else:
-                                                            print(f"❌ Could not find 'Processar' button after Grava")
+                                                            print(f"❌ Could not find 'Grava' button")
                                                     else:
-                                                        print(f"❌ Could not find 'Grava' button")
-                                                else:
-                                                    print(f"❌ Could not find 'Altera' button")
-                                            except Exception as e:
-                                                print(f"❌ Error in Altera → Grava → Processar workflow: {e}")
-                                                import traceback
-                                                traceback.print_exc()
+                                                        print(f"❌ Could not find 'Altera' button")
+                                                except Exception as e:
+                                                    print(f"❌ Error in Altera → Grava → Processar workflow: {e}")
+                                                    import traceback
+                                                    traceback.print_exc()
+                                            else:
+                                                # Dropdown is NOT EMPTY - Skip Altera and Grava, go directly to Processar
+                                                print(f"\n🔘 Dropdown has value '{dropdown_value}' - Skipping to DIRECT Processar click")
+
+                                                try:
+                                                    # Extract usuario from dropdown BEFORE clicking Processar
+                                                    print(f"\n📋 Extracting usuario from dropdown...")
+                                                    usuario_processar = None
+                                                    try:
+                                                        usuario_dropdown = page.query_selector('input#ctl00_contentManager_ddlusuario_I')
+                                                        if usuario_dropdown:
+                                                            usuario_processar = usuario_dropdown.get_attribute('value')
+                                                            print(f"✓ Usuario extracted: {usuario_processar}")
+                                                        else:
+                                                            print(f"⚠ Usuario dropdown not found")
+                                                    except Exception as e:
+                                                        print(f"⚠ Error extracting usuario: {e}")
+
+                                                    # Directly click the "Processar" button
+                                                    print(f"\n🔘 Clicking 'Processar' button directly...")
+
+                                                    processar_button = page.query_selector('input[name="ctl00$contentManager$btVaduMDProcessa"]')
+
+                                                    if processar_button:
+                                                        processar_button.click()
+                                                        print(f"✓ Clicked 'Processar' button")
+
+                                                        # Mark as processed in database BEFORE restarting browser
+                                                        if not dry_run and session:
+                                                            # Use raw SQL UPDATE to avoid ORM optimistic locking issues
+                                                            from sqlalchemy import text
+
+                                                            max_retries = 3
+                                                            retry_delay = 1  # seconds
+
+                                                            for attempt in range(max_retries):
+                                                                try:
+                                                                    update_sql = text("""
+                                                                        UPDATE apr_valid_records
+                                                                        SET is_processado = 1,
+                                                                            is_bot_processed = 1,
+                                                                            rating_selecionado = :rating_value,
+                                                                            usuario_processar = :usuario_processar
+                                                                        WHERE DATA = :data
+                                                                          AND PROPOSTA = :proposta
+                                                                          AND CEDENTE = :cedente
+                                                                          AND RAMO = :ramo
+                                                                    """)
+                                                                    session.execute(update_sql, {
+                                                                        'rating_value': rating_value,
+                                                                        'usuario_processar': usuario_processar,
+                                                                        'data': record.DATA,
+                                                                        'proposta': record.PROPOSTA,
+                                                                        'cedente': record.CEDENTE,
+                                                                        'ramo': record.RAMO
+                                                                    })
+                                                                    session.commit()
+                                                                    print(f"✓ Marked Proposta {record.PROPOSTA} as processed (is_bot_processed=1, rating={rating_value}, usuario={usuario_processar})")
+                                                                    break  # Success, exit retry loop
+                                                                except Exception as e:
+                                                                    session.rollback()
+                                                                    if attempt < max_retries - 1:
+                                                                        print(f"⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
+                                                                        print(f"  Waiting {retry_delay}s before retry...")
+                                                                        time.sleep(retry_delay)
+                                                                    else:
+                                                                        print(f"❌ Could not mark as processed after {max_retries} attempts: {e}")
+                                                        else:
+                                                            print(f"[DRY RUN] Would mark Proposta {record.PROPOSTA} as processed (is_bot_processed=1, rating={rating_value}, usuario={usuario_processar})")
+
+                                                        # SIMPLIFIED APPROACH: Always close browser and restart after clicking Processar
+                                                        # This avoids issues with unresponsive pages, DNS errors, etc.
+                                                        print(f"   Waiting 15 seconds...")
+                                                        time.sleep(15)
+
+                                                        print(f"   Closing browser and exiting Playwright context...")
+
+                                                        # Close browser
+                                                        try:
+                                                            browser.close()
+                                                        except:
+                                                            pass
+
+                                                        # Close database session
+                                                        if session:
+                                                            try:
+                                                                session.close()
+                                                            except:
+                                                                pass
+
+                                                        # Exit the Playwright context and restart
+                                                        print(f"\n{'='*80}")
+                                                        print(f"RESTARTING PROCESS AFTER CLICKING PROCESSAR")
+                                                        print(f"{'='*80}\n")
+
+                                                        # Wait a bit before restarting
+                                                        time.sleep(5)
+
+                                                        # Return a special value to indicate restart is needed
+                                                        # This will exit the 'with sync_playwright()' context
+                                                        return 'RESTART_NEEDED'
+                                                    else:
+                                                        print(f"❌ Could not find 'Processar' button")
+                                                except Exception as e:
+                                                    print(f"❌ Error in direct Processar workflow: {e}")
+                                                    import traceback
+                                                    traceback.print_exc()
                                         else:
                                             # Button value is not "Processar", just mark as processed
                                             print(f"⚠ Button value is '{button_value}' (not 'Processar'), skipping click")
 
                                             # Mark as processed in database if not dry run
                                             if not dry_run and session:
-                                                # Retry logic for database update (in case of concurrent updates)
+                                                # Use raw SQL UPDATE to avoid ORM optimistic locking issues
+                                                from sqlalchemy import text
+
                                                 max_retries = 3
                                                 retry_delay = 1  # seconds
 
                                                 for attempt in range(max_retries):
                                                     try:
-                                                        # Refresh the record to avoid stale data
-                                                        session.refresh(record)
-                                                        record.is_processado = 1
+                                                        update_sql = text("""
+                                                            UPDATE apr_valid_records
+                                                            SET is_processado = 1,
+                                                                rating_selecionado = :rating_value
+                                                            WHERE DATA = :data
+                                                              AND PROPOSTA = :proposta
+                                                              AND CEDENTE = :cedente
+                                                              AND RAMO = :ramo
+                                                        """)
+                                                        session.execute(update_sql, {
+                                                            'rating_value': rating_value,
+                                                            'data': record.DATA,
+                                                            'proposta': record.PROPOSTA,
+                                                            'cedente': record.CEDENTE,
+                                                            'ramo': record.RAMO
+                                                        })
                                                         session.commit()
-                                                        print(f"✓ Marked Proposta {record.PROPOSTA} as processed in database (without clicking)")
+                                                        print(f"✓ Marked Proposta {record.PROPOSTA} as processed (without clicking, rating={rating_value})")
                                                         break  # Success, exit retry loop
                                                     except Exception as e:
                                                         session.rollback()
@@ -843,7 +1383,7 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                         else:
                                                             print(f"❌ Could not mark as processed after {max_retries} attempts: {e}")
                                             else:
-                                                print(f"[DRY RUN] Would mark Proposta {record.PROPOSTA} as processed (without clicking)")
+                                                print(f"[DRY RUN] Would mark Proposta {record.PROPOSTA} as processed (without clicking, rating={rating_value})")
                                     else:
                                         print(f"❌ Could not find 'Processar' button")
                                 else:

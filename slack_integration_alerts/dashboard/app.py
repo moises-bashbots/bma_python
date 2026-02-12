@@ -375,6 +375,10 @@ def api_all_proposals():
                     v.last_updated,
                     v.is_processado,
                     v.is_bot_processed,
+                    v.is_confirmado,
+                    v.rating_selecionado,
+                    v.usuario_processar,
+                    v.usuario_confirmar,
                     'VALID' as VALIDATION_STATUS,
                     NULL as VALIDATION_TYPE,
                     NULL as MOTIVO,
@@ -400,7 +404,8 @@ def api_all_proposals():
                 GROUP BY v.DATA, v.PROPOSTA, v.CEDENTE, v.RAMO, v.GERENTE, v.EMPRESA,
                          v.STATUS, h.NEW_STATUS,
                          v.VLR_APROVADOS, v.QTD_APROVADOS, v.VALOR_TITULOS, v.QTD_TITULOS,
-                         v.first_seen, v.last_updated, v.is_processado, v.is_bot_processed
+                         v.first_seen, v.last_updated, v.is_processado, v.is_bot_processed,
+                         v.is_confirmado, v.rating_selecionado, v.usuario_processar, v.usuario_confirmar
             """)
             valid_proposals = list(cursor.fetchall())
 
@@ -423,6 +428,8 @@ def api_all_proposals():
                     MAX(i.detected_at) as last_updated,
                     0 as is_processado,
                     0 as is_bot_processed,
+                    0 as is_confirmado,
+                    NULL as rating_selecionado,
                     'INVALID' as VALIDATION_STATUS,
                     GROUP_CONCAT(DISTINCT i.VALIDATION_TYPE ORDER BY i.VALIDATION_TYPE SEPARATOR ', ') as VALIDATION_TYPE,
                     GROUP_CONCAT(DISTINCT i.MOTIVO ORDER BY i.MOTIVO SEPARATOR ' | ') as MOTIVO,

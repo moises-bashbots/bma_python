@@ -102,6 +102,30 @@ class APRValidRecord(MariaDBBase):
         nullable=False,
         comment='Bot processing status: 0=not processed by bot, 1=bot clicked Processar'
     )
+    is_confirmado = Column(
+        SmallInteger,  # TINYINT maps to SmallInteger in SQLAlchemy
+        default=0,
+        nullable=False,
+        comment='Confirmation status: 0=not confirmed, 1=confirmed processed in GER system'
+    )
+    rating_selecionado = Column(
+        String(50),
+        default=None,
+        nullable=True,
+        comment='Rating selected in GER dropdown when processing proposal (e.g., RATING A+, SINTÉTICO)'
+    )
+    usuario_processar = Column(
+        String(100),
+        default=None,
+        nullable=True,
+        comment='Username selected in GER dropdown when clicking Processar button'
+    )
+    usuario_confirmar = Column(
+        String(100),
+        default=None,
+        nullable=True,
+        comment='Username selected in GER dropdown during confirmation check'
+    )
 
     # Tracking fields
     first_seen = Column(
@@ -129,6 +153,8 @@ class APRValidRecord(MariaDBBase):
         Index('idx_last_updated', 'last_updated'),
         Index('idx_is_processado', 'is_processado'),
         Index('idx_is_bot_processed', 'is_bot_processed'),
+        Index('idx_is_confirmado', 'is_confirmado'),
+        Index('idx_rating_selecionado', 'rating_selecionado'),
     )
     
     def __repr__(self):
@@ -139,7 +165,10 @@ class APRValidRecord(MariaDBBase):
             f"CEDENTE={self.CEDENTE}, "
             f"RAMO={self.RAMO}, "
             f"STATUS={self.STATUS}, "
-            f"is_processado={self.is_processado}"
+            f"rating_selecionado={self.rating_selecionado}, "
+            f"is_processado={self.is_processado}, "
+            f"is_bot_processed={self.is_bot_processed}, "
+            f"is_confirmado={self.is_confirmado}"
             f")>"
         )
     

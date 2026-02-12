@@ -523,7 +523,7 @@
                 html += '<th style="width: 30px;"></th>'; // Expand button column
                 html += '<th>Proposta</th><th>Cliente</th><th>Ramo</th><th>Gerente</th>';
                 html += '<th>Status</th><th>Valor Aprovado</th><th>Qtd Títulos</th><th>Produtos</th><th>Primeira Vez</th><th>Última Atualização</th>';
-                html += '<th>Processado</th><th>Validação</th><th>Tipos de Erro</th>';
+                html += '<th>Processado</th><th>Confirmado</th><th>Validação</th><th>Tipos de Erro</th>';
                 html += '</tr></thead><tbody>';
 
                 // Sort by proposal number in descending order
@@ -546,7 +546,14 @@
 
                     html += `<td><strong style="color: #1e293b;">${row.PROPOSTA}</strong></td>`;
                     html += `<td style="color: #334155;">${row.CEDENTE || '-'}</td>`;
-                    html += `<td style="color: #475569;">${row.RAMO || '-'}</td>`;
+
+                    // RAMO column - show submitted rating if available, otherwise show RAMO
+                    if (row.rating_selecionado) {
+                        html += `<td style="color: #059669; font-weight: 600;">${row.rating_selecionado}</td>`;
+                    } else {
+                        html += `<td style="color: #475569;">${row.RAMO || '-'}</td>`;
+                    }
+
                     html += `<td style="color: #475569;">${row.GERENTE || '-'}</td>`;
                     html += `<td style="color: #475569;">${row.STATUS || '-'}</td>`;
                     html += `<td style="color: #1e293b; font-weight: 600;">${formatCurrency(row.VLR_APROVADOS)}</td>`;
@@ -559,13 +566,34 @@
                     html += `<td style="color: #64748b; font-size: 12px;">${formatTime(row.last_updated)}</td>`;
 
                     // Processed status
+                    html += '<td>';
                     if (row.is_bot_processed === 1) {
-                        html += '<td><span class="status-badge bot-processed">BOT</span></td>';
+                        html += '<span class="status-badge bot-processed">BOT</span>';
                     } else if (row.is_processado === 1) {
-                        html += '<td><span class="status-badge processed">SIM</span></td>';
+                        html += '<span class="status-badge processed">SIM</span>';
                     } else {
-                        html += '<td><span class="status-badge not-processed">NÃO</span></td>';
+                        html += '<span class="status-badge not-processed">NÃO</span>';
                     }
+                    // Show usuario_processar if available
+                    if (row.usuario_processar) {
+                        html += `<br><small style="color: #64748b; font-size: 10px;">${row.usuario_processar}</small>`;
+                    }
+                    html += '</td>';
+
+                    // Confirmation status
+                    html += '<td>';
+                    if (row.is_confirmado === 1) {
+                        html += '<span class="status-badge" style="background: #10b981; color: white;">✓ SIM</span>';
+                    } else if (row.is_bot_processed === 1 || row.is_processado === 1) {
+                        html += '<span class="status-badge" style="background: #f59e0b; color: white;">⏳ PENDENTE</span>';
+                    } else {
+                        html += '<span class="status-badge" style="background: #9ca3af; color: white;">-</span>';
+                    }
+                    // Show usuario_confirmar if available
+                    if (row.usuario_confirmar) {
+                        html += `<br><small style="color: #64748b; font-size: 10px;">${row.usuario_confirmar}</small>`;
+                    }
+                    html += '</td>';
 
                     // Validation status
                     if (isValid) {
@@ -586,7 +614,7 @@
                     // Details row (only for invalid records)
                     if (!isValid) {
                         html += `<tr class="details-row" id="details-${proposalId}">`;
-                        html += '<td colspan="14" class="details-cell">';
+                        html += '<td colspan="15" class="details-cell">';
                         html += '<div class="details-content">';
                         html += `<h4>❌ Detalhes do Erro de Validação</h4>`;
                         html += `<p><strong>Tipo:</strong> ${row.VALIDATION_TYPE}</p>`;

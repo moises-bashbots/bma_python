@@ -810,7 +810,8 @@ STATUS_PROGRESSION = [
     "Enviado para Assinar",
     "Assinado",
     "Liberado",
-    "Finalizado"
+    "Finalizado",
+    "Pago"  # Proposals that have been paid
 ]
 
 
@@ -990,6 +991,7 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         'NOTA COMERCIAL',
         'MEIA NOTA',
         'COBRANÇA SIMPLES',
+        'CHEQUE',  # CHEQUE products don't need DUPLICATA validation
     ]
     # Convert to uppercase for case-insensitive comparison
     products_no_duplicata_validation = [p.upper() for p in products_no_duplicata_validation]
@@ -1003,18 +1005,9 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
     # Convert to uppercase for case-insensitive comparison
     products_no_seuno_validation = [p.upper() for p in products_no_seuno_validation]
 
-    # Query 2b: Records WITHOUT NFEChave but with specific product types
-    # These products don't require NFE validation, only DUPLICATA format (separator + sequential)
-    specific_products = [
-        'INTERCIA NFSE',
-        'NF SERV. BMA SEC.',
-        'CAPITAL DE GIRO NP',
-        'NF SERV. PRE-IMPR. BMA FIDC',
-        'NF SERV. BMA FIDC',
-        'CCB',
-        'CONVENCIONAL BMA FIDC',
-    ]
-
+    # Query 2b: Records WITHOUT NFEChave - ALL products
+    # Changed to OUTERJOIN to include ALL products, not just specific ones
+    # Validation rules will be applied conditionally based on product type
     query_without_nfe = session.query(
         APRCapa.GERENTE,
         APRCapa.NUMERO.label('PROPOSTA'),
@@ -1037,10 +1030,10 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
     ).join(
         Cedente,
         APRCapa.CEDENTE == Cedente.apelido
-    ).join(
+    ).outerjoin(
         ProdutoCedente,
         APRTitulos.id_produto == ProdutoCedente.Id
-    ).join(
+    ).outerjoin(
         Produto,
         ProdutoCedente.IdProdutoAtributo == Produto.Id
     ).filter(
@@ -1048,12 +1041,11 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         or_(
             APRTitulos.NFEChave.is_(None),
             APRTitulos.NFEChave == ''
-        ),
-        Produto.Descritivo.in_(specific_products)
+        )
     ).distinct()
 
     results_without_nfe = query_without_nfe.all()
-    print(f"Found {len(results_without_nfe)} records with specific products (no NFEChave required)")
+    print(f"Found {len(results_without_nfe)} records without NFEChave (all products)")
 
     # Combine both result sets
     results = list(results_with_nfe) + list(results_without_nfe)
@@ -1093,67 +1085,99 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         # Validate NFEChave FIRST (before DUPLICATA and SEUNO)
         # Skip validation for products that don't require it (case-insensitive)
         produto_upper = produto.upper() if produto else ""
-        nfechave_valid = True
-        nfechave_motivo = ""
 
-        if produto_upper not in products_no_nfechave_validation:
-            # This product requires NFEChave validation
-            nfechave_valid = validate_nfechave(nfe_chave)
-            if not nfechave_valid:
-                nfechave_motivo = get_invalid_nfechave_reason(produto or "PRODUTO")
+        # DEFENSIVE CHECK: If PRODUTO is NULL/missing, skip ALL validations
+        # We cannot determine validation rules without knowing the product type
+        if not produto or not produto.strip():
+            # Log warning and skip validation for this record
+            print(f"  ⚠️  WARNING: Proposta {proposta} - Título with NULL/missing PRODUTO - skipping validation")
+            print(f"     CEDENTE: {cedente}, DUPLICATA: {duplicata}, SEUNO: {seuno}")
+            # Mark as valid since we can't validate without product info
+            nfechave_valid = True
+            nfechave_motivo = ""
+            duplicata_valid = True
+            duplicata_motivo = ""
+            seuno_valid = True
+            seuno_motivo = ""
+            seuno_range = ""
+            seuno_company = ""
+            verification_digit = ""
+        else:
+            # PRODUTO is available - proceed with normal validation
+            nfechave_valid = True
+            nfechave_motivo = ""
 
-        # Validate DUPLICATA (only if NFEChave is valid)
-        # Skip validation for products that don't require it (case-insensitive)
-        duplicata_valid = True
-        duplicata_motivo = ""
+            if produto_upper not in products_no_nfechave_validation:
+                # This product requires NFEChave validation
+                nfechave_valid = validate_nfechave(nfe_chave)
+                if not nfechave_valid:
+                    nfechave_motivo = get_invalid_nfechave_reason(produto or "PRODUTO")
 
-        if nfechave_valid:  # Only validate DUPLICATA if NFEChave is valid
-            if produto_upper in products_no_duplicata_validation:
-                # No DUPLICATA validation needed for these products
-                duplicata_valid = True
-                duplicata_motivo = ""
-            elif nfe:
-                # NFE exists - use full validation
-                duplicata_valid = validate_duplicata_format(duplicata, nfe)
-                duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason(duplicata, nfe)
-            else:
-                # No NFE - use simple validation (only check separator + sequential)
-                duplicata_valid = validate_duplicata_format_simple(duplicata)
-                duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason_simple(duplicata)
+            # Validate DUPLICATA (only if NFEChave is valid)
+            # Skip validation for products that don't require it (case-insensitive)
+            duplicata_valid = True
+            duplicata_motivo = ""
 
-        # Validate SEUNO (only if NFEChave is valid and for cedentes with pre-impresso)
-        # Skip validation for products that don't require it (case-insensitive)
-        seuno_valid = True
-        seuno_motivo = ""
-        seuno_range = ""
-        seuno_company = ""
-        verification_digit = ""
+            if nfechave_valid:  # Only validate DUPLICATA if NFEChave is valid
+                if produto_upper in products_no_duplicata_validation:
+                    # No DUPLICATA validation needed for these products
+                    duplicata_valid = True
+                    duplicata_motivo = ""
+                elif nfe:
+                    # NFE exists - use full validation
+                    duplicata_valid = validate_duplicata_format(duplicata, nfe)
+                    duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason(duplicata, nfe)
+                else:
+                    # No NFE - use simple validation (only check separator + sequential)
+                    duplicata_valid = validate_duplicata_format_simple(duplicata)
+                    duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason_simple(duplicata)
 
-        if nfechave_valid:  # Only validate SEUNO if NFEChave is valid
-            if produto_upper in products_no_seuno_validation:
-                # No SEUNO validation needed for these products
-                seuno_valid = True
-                seuno_motivo = ""
-            elif cedente in cedente_ranges:
-                # This cedente has pre-impresso ranges
-                ranges_list = cedente_ranges[cedente]
+            # Validate SEUNO (only if NFEChave is valid and for cedentes with pre-impresso)
+            # Skip validation for products that don't require it (case-insensitive)
+            seuno_valid = True
+            seuno_motivo = ""
+            seuno_range = ""
+            seuno_company = ""
+            verification_digit = ""
 
-                # Try to find matching range based on empresa
-                matching_pair = None
-                for company, range_val in ranges_list:
-                    if empresa and company in empresa.upper():
-                        matching_pair = {'company': company, 'range': range_val}
-                        break
+            if nfechave_valid:  # Only validate SEUNO if NFEChave is valid
+                if produto_upper in products_no_seuno_validation:
+                    # No SEUNO validation needed for these products
+                    seuno_valid = True
+                    seuno_motivo = ""
+                elif cedente in cedente_ranges:
+                    # This cedente has pre-impresso ranges
+                    ranges_list = cedente_ranges[cedente]
 
-                if not matching_pair and ranges_list:
-                    # Use first range if no match found
-                    matching_pair = {'company': ranges_list[0][0], 'range': ranges_list[0][1]}
+                    # NEW LOGIC: Try ALL ranges and accept if ANY match
+                    # This fixes the issue where cedentes with multiple ranges (e.g., COMBRASIL with ranges 3 and 5061)
+                    # would only validate against the first matching range, causing false negatives
 
-                if matching_pair:
-                    seuno_company = matching_pair['company']
-                    seuno_range = matching_pair['range']
                     verification_digit = calculate_verification_digit(seuno or '')
-                    seuno_valid, seuno_motivo = validate_seuno(seuno, seuno_range, verification_digit)
+                    seuno_valid = False
+                    seuno_motivo = ""
+                    matched_range = None
+                    all_validation_errors = []
+
+                    # Try each range until we find a valid match
+                    for company, range_val in ranges_list:
+                        is_valid, motivo = validate_seuno(seuno, range_val, verification_digit)
+
+                        if is_valid:
+                            # Found a valid range! Mark as valid and record which range matched
+                            seuno_valid = True
+                            seuno_motivo = ""
+                            matched_range = {'company': company, 'range': range_val}
+                            seuno_company = company
+                            seuno_range = range_val
+                            break  # No need to check other ranges
+                        else:
+                            # Record the error for this range
+                            all_validation_errors.append(f"Range {range_val} ({company}): {motivo}")
+
+                    # If no range matched, combine all error messages
+                    if not seuno_valid:
+                        seuno_motivo = " | ".join(all_validation_errors)
 
         # Determine overall validity
         is_valid = nfechave_valid and duplicata_valid and seuno_valid
@@ -1244,18 +1268,9 @@ def query_valid_records_with_status_filter(session, target_date, invalid_record_
     results_with_nfe = query_with_nfe.all()
     print(f"Found {len(results_with_nfe)} records with NFEChave")
 
-    # Query 2: Records WITHOUT NFEChave but with specific product types
-    # These products don't require NFE validation
-    specific_products = [
-        'INTERCIA NFSE',
-        'NF SERV. BMA SEC.',
-        'CAPITAL DE GIRO NP',
-        'NF SERV. PRE-IMPR. BMA FIDC',
-        'NF SERV. BMA FIDC',
-        'CCB',
-        'CONVENCIONAL BMA FIDC',
-    ]
-
+    # Query 2: Records WITHOUT NFEChave - ALL products
+    # Changed to OUTERJOIN to include ALL products, not just specific ones
+    # Validation rules will be applied conditionally based on product type
     query_without_nfe = session.query(
         APRCapa.GERENTE,
         APRCapa.NUMERO.label('PROPOSTA'),
@@ -1280,10 +1295,10 @@ def query_valid_records_with_status_filter(session, target_date, invalid_record_
     ).join(
         Cedente,
         APRCapa.CEDENTE == Cedente.apelido
-    ).join(
+    ).outerjoin(
         ProdutoCedente,
         APRTitulos.id_produto == ProdutoCedente.Id
-    ).join(
+    ).outerjoin(
         Produto,
         ProdutoCedente.IdProdutoAtributo == Produto.Id
     ).filter(
@@ -1291,12 +1306,11 @@ def query_valid_records_with_status_filter(session, target_date, invalid_record_
         or_(
             APRTitulos.NFEChave.is_(None),
             APRTitulos.NFEChave == ''
-        ),
-        Produto.Descritivo.in_(specific_products)
+        )
     ).distinct()
 
     results_without_nfe = query_without_nfe.all()
-    print(f"Found {len(results_without_nfe)} records with specific products (no NFEChave required)")
+    print(f"Found {len(results_without_nfe)} records without NFEChave (all products)")
 
     # Combine both result sets
     results = list(results_with_nfe) + list(results_without_nfe)
