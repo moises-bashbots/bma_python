@@ -562,12 +562,6 @@ def read_proposals_table(page, save_html=False):
 
     print(f"✓ Extracted {len(proposals)} proposals using JavaScript (much faster)")
 
-    # Print first 3 rows as sample
-    if len(proposals) > 0:
-        print("\nSample rows (first 3):")
-        for i, row in enumerate(proposals[:3]):
-            print(f"  Row {i+1}: {row}")
-
     return headers, proposals
 
 
@@ -1027,15 +1021,19 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                     print(f"✓ Selected rating: {rating_value}")
                                     time.sleep(1)
 
-                                    # Check the "Processar" button value before clicking
+                                    # Check the "Processar" button value and state before clicking
                                     print(f"\n🔘 Checking 'Processar' button...")
                                     processar_button = page.query_selector('input[name="ctl00$contentManager$btVaduMDProcessa"]')
 
                                     if processar_button:
                                         button_value = processar_button.get_attribute('value')
-                                        print(f"   Button value: {button_value}")
+                                        button_disabled = processar_button.get_attribute('disabled')
+                                        is_enabled = button_disabled is None  # Button is enabled if 'disabled' attribute is not present
 
-                                        if button_value == "Processar":
+                                        print(f"   Button value: {button_value}")
+                                        print(f"   Button enabled: {is_enabled}")
+
+                                        if button_value == "Processar" and is_enabled:
                                             # Check the dropdown value to decide workflow
                                             print(f"\n🔘 Checking dropdown value (ddlusuario_I)...")
 
@@ -1341,6 +1339,11 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                                                     print(f"❌ Error in direct Processar workflow: {e}")
                                                     import traceback
                                                     traceback.print_exc()
+                                        elif button_value == "Processar" and not is_enabled:
+                                            # Button shows "Processar" but is DISABLED - skip this proposal
+                                            print(f"⚠ Button shows 'Processar' but is DISABLED - cannot click")
+                                            print(f"⏭ Skipping Proposta {record.PROPOSTA} (button disabled, will retry later)")
+                                            # Don't mark as processed - leave it for next iteration when button might be enabled
                                         else:
                                             # Button value is not "Processar", just mark as processed
                                             print(f"⚠ Button value is '{button_value}' (not 'Processar'), skipping click")
@@ -1481,7 +1484,7 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                 time.sleep(final_pause)
 
             print("\n" + "=" * 80)
-            print("✓ Process completed successfully!")
+            print("✓ Processing phase completed successfully!")
             print("=" * 80)
 
         except PlaywrightTimeout as e:
@@ -1498,6 +1501,51 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
         finally:
             # Close browser
             browser.close()
+
+    # After processing phase is complete and browser is closed,
+    # check for records needing confirmation
+    print(f"\n{'='*80}")
+    print("CHECKING FOR RECORDS NEEDING CONFIRMATION")
+    print(f"{'='*80}")
+
+    try:
+        # Re-query for records needing confirmation
+        if not session:
+            session = create_mariadb_session()
+
+        confirmation_records = get_records_needing_confirmation(session, target_date)
+
+        if len(confirmation_records) > 0:
+            print(f"✓ Found {len(confirmation_records)} records needing confirmation")
+            print(f"\nRecords needing confirmation:")
+            for record in confirmation_records:
+                print(f"  - Proposta {record.PROPOSTA}: {record.CEDENTE} ({record.RAMO})")
+
+            # Close session before starting confirmation phase
+            if session:
+                session.close()
+                session = None
+
+            # Run confirmation phase (it will create its own Playwright context)
+            return confirm_processed_records(
+                rating_group=rating_group,
+                headless=headless,
+                dry_run=dry_run,
+                pause_seconds=pause_seconds,
+                final_pause=final_pause,
+                target_date=target_date
+            )
+        else:
+            print("✓ No records need confirmation")
+
+    except Exception as e:
+        print(f"⚠️  Warning: Could not check for confirmation records: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Make sure session is closed
+        if session:
+            session.close()
 
     return True
 
@@ -1517,8 +1565,8 @@ def main():
     parser.add_argument(
         "--headless",
         action="store_true",
-        default=False,
-        help="Run browser in headless mode (default: False)"
+        default=True,
+        help="Run browser in headless mode (default: True)"
     )
     parser.add_argument(
         "--no-headless",
@@ -1545,13 +1593,19 @@ def main():
     parser.add_argument(
         "--loop",
         action="store_true",
-        help="Run in continuous loop mode"
+        default=True,
+        help="Run in continuous loop mode (default: True)"
+    )
+    parser.add_argument(
+        "--no-loop",
+        action="store_true",
+        help="Run in single-run mode (overrides --loop)"
     )
     parser.add_argument(
         "--loop-interval",
         type=int,
-        default=60,
-        help="Seconds to wait between loop iterations (default: 60)"
+        default=5,
+        help="Seconds to wait between loop iterations (default: 5)"
     )
 
     args = parser.parse_args()
@@ -1559,8 +1613,11 @@ def main():
     # Handle headless mode
     headless = args.headless and not args.no_headless
 
+    # Handle loop mode
+    loop_mode = args.loop and not args.no_loop
+
     # Run the automation
-    if args.loop:
+    if loop_mode:
         print("=" * 80)
         print("RUNNING IN LOOP MODE")
         print(f"Loop interval: {args.loop_interval} seconds")
