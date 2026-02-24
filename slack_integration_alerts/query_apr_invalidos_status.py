@@ -315,10 +315,66 @@ def get_invalid_nfechave_reason(produto: str) -> str:
 
 
 # ============================================================================
+# VALIDATION EXCEPTION HELPERS
+# ============================================================================
+
+def load_validation_exceptions():
+    """
+    Load validation exceptions from JSON configuration file.
+
+    Returns:
+        Dictionary with exception lists, or empty dict if file not found
+    """
+    try:
+        # Use Path(__file__).parent for source code, Path.cwd() for PyInstaller binary
+        config_paths = [
+            Path(__file__).parent / 'validation_exceptions.json',  # Source code
+            Path.cwd() / 'validation_exceptions.json',  # PyInstaller binary
+        ]
+
+        for config_path in config_paths:
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+
+        # If no config file found, return empty exceptions
+        print("⚠️  Warning: validation_exceptions.json not found - no exceptions will be applied")
+        return {"duplicata_separator_exceptions": {"grupos": [], "cedentes": []}}
+    except Exception as e:
+        print(f"⚠️  Warning: Error loading validation_exceptions.json: {e}")
+        return {"duplicata_separator_exceptions": {"grupos": [], "cedentes": []}}
+
+
+def should_skip_separator_validation(cedente: str, grupo: str) -> bool:
+    """
+    Check if cedente or grupo is in the exception list for separator validation.
+
+    Args:
+        cedente: Cedente apelido (e.g., "RIOMAR")
+        grupo: Cedente grupo (e.g., "CEDRO")
+
+    Returns:
+        True if separator validation should be skipped, False otherwise
+    """
+    exceptions = load_validation_exceptions()
+    separator_exceptions = exceptions.get('duplicata_separator_exceptions', {})
+
+    # Get exception lists (case-insensitive comparison)
+    exception_grupos = [g.upper() for g in separator_exceptions.get('grupos', [])]
+    exception_cedentes = [c.upper() for c in separator_exceptions.get('cedentes', [])]
+
+    # Check if cedente or grupo is in exception list
+    cedente_upper = cedente.upper() if cedente else ""
+    grupo_upper = grupo.upper() if grupo else ""
+
+    return cedente_upper in exception_cedentes or grupo_upper in exception_grupos
+
+
+# ============================================================================
 # DUPLICATA VALIDATION FUNCTIONS
 # ============================================================================
 
-def validate_duplicata_format(duplicata: str, nfe: int) -> bool:
+def validate_duplicata_format(duplicata: str, nfe: int, cedente: str = None, grupo: str = None) -> bool:
     """
     Validate DUPLICATA nomenclature.
 
@@ -328,9 +384,15 @@ def validate_duplicata_format(duplicata: str, nfe: int) -> bool:
         - 21467-1, 21467-2 (valid for NFE=21467)
         - 140917/01, 140917/02 (valid for NFE=140917)
 
+    Exception: For specific grupos/cedentes in validation_exceptions.json:
+        - Separator validation is skipped
+        - NFE only needs to be CONTAINED in DUPLICATA (not necessarily at the beginning)
+
     Args:
         duplicata: The DUPLICATA field value
         nfe: The NFE integer value
+        cedente: Cedente apelido (optional, for exception checking)
+        grupo: Cedente grupo (optional, for exception checking)
 
     Returns:
         True if valid format, False otherwise
@@ -338,20 +400,31 @@ def validate_duplicata_format(duplicata: str, nfe: int) -> bool:
     if not duplicata or not nfe:
         return False
 
+    duplicata = duplicata.strip()
+
+    # Check if this cedente/grupo should skip separator validation
+    if should_skip_separator_validation(cedente, grupo):
+        # Exception rule: Only check if NFE is CONTAINED anywhere in DUPLICATA
+        # Simply check if the NFE number (as string) is contained in DUPLICATA
+        return str(nfe) in duplicata
+
+    # Standard validation: NFE + separator (/ or -) + sequential number
     # Pattern: NFE (with optional leading zeros) + separator (/ or -) + sequential number (1+ digits)
     # The NFE part should match the actual NFE value (with or without leading zeros)
     pattern = rf'^0*{nfe}[-/]\d+$'
 
-    return bool(re.match(pattern, duplicata.strip()))
+    return bool(re.match(pattern, duplicata))
 
 
-def get_invalid_duplicata_reason(duplicata: str, nfe: int) -> str:
+def get_invalid_duplicata_reason(duplicata: str, nfe: int, cedente: str = None, grupo: str = None) -> str:
     """
     Get the reason why DUPLICATA format is invalid (in Brazilian Portuguese).
 
     Args:
         duplicata: The DUPLICATA field value
         nfe: The NFE integer value
+        cedente: Cedente apelido (optional, for exception checking)
+        grupo: Cedente grupo (optional, for exception checking)
 
     Returns:
         String describing the error reason in Portuguese
@@ -364,27 +437,35 @@ def get_invalid_duplicata_reason(duplicata: str, nfe: int) -> str:
 
     duplicata = duplicata.strip()
 
+    # Check if this cedente/grupo should skip separator validation
+    skip_separator = should_skip_separator_validation(cedente, grupo)
+
     # Check if it contains the NFE number
     if str(nfe) not in duplicata and not re.search(rf'0*{nfe}', duplicata):
         return f"DUPLICATA não contém o número da NFE ({nfe})"
 
-    # Check if it has a separator
-    if '-' not in duplicata and '/' not in duplicata:
-        return "Falta separador (- ou /) entre NFE e número sequencial"
+    if not skip_separator:
+        # Standard validation: check separator requirement
+        # Check if it has a separator
+        if '-' not in duplicata and '/' not in duplicata:
+            return "Falta separador (- ou /) entre NFE e número sequencial"
 
-    # Check if NFE is at the beginning
-    if not re.match(rf'^0*{nfe}', duplicata):
-        return f"NFE ({nfe}) não está no início da DUPLICATA"
+        # Check if NFE is at the beginning
+        if not re.match(rf'^0*{nfe}', duplicata):
+            return f"NFE ({nfe}) não está no início da DUPLICATA"
 
-    # Check if there's a sequential number after separator
-    if not re.search(r'[-/]\d+$', duplicata):
-        return "Falta número sequencial após o separador"
+        # Check if there's a sequential number after separator
+        if not re.search(r'[-/]\d+$', duplicata):
+            return "Falta número sequencial após o separador"
 
     # Generic error
-    return "Formato inválido - esperado: NFE + separador (- ou /) + número sequencial"
+    if skip_separator:
+        return "Formato inválido - esperado: NFE contido na DUPLICATA"
+    else:
+        return "Formato inválido - esperado: NFE + separador (- ou /) + número sequencial"
 
 
-def validate_duplicata_format_simple(duplicata: str) -> bool:
+def validate_duplicata_format_simple(duplicata: str, cedente: str = None, grupo: str = None) -> bool:
     """
     Validate DUPLICATA format without NFE validation.
     Used for specific product types that don't require NFE.
@@ -393,6 +474,8 @@ def validate_duplicata_format_simple(duplicata: str) -> bool:
 
     Args:
         duplicata: The DUPLICATA field value
+        cedente: Cedente apelido (optional, for exception checking)
+        grupo: Cedente grupo (optional, for exception checking)
 
     Returns:
         True if has separator and sequential number, False otherwise
@@ -400,17 +483,26 @@ def validate_duplicata_format_simple(duplicata: str) -> bool:
     if not duplicata:
         return False
 
-    # Pattern: anything + separator (/ or -) + sequential number (1+ digits)
+    duplicata = duplicata.strip()
+
+    # Check if this cedente/grupo should skip separator validation
+    if should_skip_separator_validation(cedente, grupo):
+        # Skip separator requirement - any non-empty DUPLICATA is valid
+        return bool(duplicata)
+
+    # Standard validation: anything + separator (/ or -) + sequential number (1+ digits)
     pattern = r'.+[-/]\d+$'
-    return bool(re.match(pattern, duplicata.strip()))
+    return bool(re.match(pattern, duplicata))
 
 
-def get_invalid_duplicata_reason_simple(duplicata: str) -> str:
+def get_invalid_duplicata_reason_simple(duplicata: str, cedente: str = None, grupo: str = None) -> str:
     """
     Get reason why DUPLICATA format is invalid (simple validation, no NFE).
 
     Args:
         duplicata: The DUPLICATA field value
+        cedente: Cedente apelido (optional, for exception checking)
+        grupo: Cedente grupo (optional, for exception checking)
 
     Returns:
         String describing the error reason in Portuguese
@@ -420,15 +512,24 @@ def get_invalid_duplicata_reason_simple(duplicata: str) -> str:
 
     duplicata = duplicata.strip()
 
-    # Check if it has a separator
-    if '-' not in duplicata and '/' not in duplicata:
-        return "Falta separador (- ou /) e número sequencial"
+    # Check if this cedente/grupo should skip separator validation
+    skip_separator = should_skip_separator_validation(cedente, grupo)
 
-    # Check if there's a sequential number after separator
-    if not re.search(r'[-/]\d+$', duplicata):
-        return "Falta número sequencial após o separador"
+    if not skip_separator:
+        # Standard validation: check separator requirement
+        # Check if it has a separator
+        if '-' not in duplicata and '/' not in duplicata:
+            return "Falta separador (- ou /) e número sequencial"
 
-    return "Formato inválido - esperado: separador (- ou /) + número sequencial"
+        # Check if there's a sequential number after separator
+        if not re.search(r'[-/]\d+$', duplicata):
+            return "Falta número sequencial após o separador"
+
+    # Generic error
+    if skip_separator:
+        return "DUPLICATA vazio ou inválido"
+    else:
+        return "Formato inválido - esperado: separador (- ou /) + número sequencial"
 
 
 def validate_cheque_proposals(session, validated_results, target_date):
@@ -503,6 +604,7 @@ def validate_cheque_proposals(session, validated_results, target_date):
             )
         ).filter(
             cast(APRCapa.DATA, Date) == data,
+            cast(APRCapa.DATA, Date) <= date.today(),  # Never include future dates
             APRCapa.NUMERO == proposta,
             APRCapa.CEDENTE == cedente
         )
@@ -928,6 +1030,7 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         APRCapa.empresa,
         APRCapa.status_atual.label('STATUS'),
         Cedente.ramo.label('RAMO'),
+        Cedente.grupo.label('GRUPO'),
         APRTitulos.SEUNO,
         APRTitulos.TITULO.label('DUPLICATA'),
         APRTitulos.NFEChave,
@@ -950,6 +1053,7 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         ProdutoCedente.IdProdutoAtributo == Produto.Id
     ).filter(
         cast(APRCapa.DATA, Date) == target_date,
+        cast(APRCapa.DATA, Date) <= date.today(),  # Never include future dates
         APRTitulos.NFEChave.isnot(None),
         APRTitulos.NFEChave != ''
     ).distinct()
@@ -996,11 +1100,13 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
     # Convert to uppercase for case-insensitive comparison
     products_no_duplicata_validation = [p.upper() for p in products_no_duplicata_validation]
 
-    # Products that don't need SEUNO validation (case-insensitive)
+    # Products that MUST have empty SEUNO (case-insensitive)
+    # These products should NOT have SEUNO filled - if SEUNO is present, it's invalid
     products_no_seuno_validation = [
         'COMISSÁRIA',
         'ESCROW DEPÓSITO',
         'CHEQUE',
+        'CAPITAL DE GIRO',
     ]
     # Convert to uppercase for case-insensitive comparison
     products_no_seuno_validation = [p.upper() for p in products_no_seuno_validation]
@@ -1016,6 +1122,7 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         APRCapa.empresa,
         APRCapa.status_atual.label('STATUS'),
         Cedente.ramo.label('RAMO'),
+        Cedente.grupo.label('GRUPO'),
         APRTitulos.SEUNO,
         APRTitulos.TITULO.label('DUPLICATA'),
         APRTitulos.NFEChave,
@@ -1038,6 +1145,7 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         ProdutoCedente.IdProdutoAtributo == Produto.Id
     ).filter(
         cast(APRCapa.DATA, Date) == target_date,
+        cast(APRCapa.DATA, Date) <= date.today(),  # Never include future dates
         or_(
             APRTitulos.NFEChave.is_(None),
             APRTitulos.NFEChave == ''
@@ -1064,6 +1172,7 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         empresa = record.empresa
         status = record.STATUS
         ramo = record.RAMO
+        grupo = record.GRUPO  # Extract GRUPO for validation exceptions
         seuno = record.SEUNO
         duplicata = record.DUPLICATA
         nfe_chave = record.NFEChave
@@ -1124,16 +1233,16 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
                     duplicata_valid = True
                     duplicata_motivo = ""
                 elif nfe:
-                    # NFE exists - use full validation
-                    duplicata_valid = validate_duplicata_format(duplicata, nfe)
-                    duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason(duplicata, nfe)
+                    # NFE exists - use full validation (pass cedente and grupo for exception checking)
+                    duplicata_valid = validate_duplicata_format(duplicata, nfe, cedente, grupo)
+                    duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason(duplicata, nfe, cedente, grupo)
                 else:
-                    # No NFE - use simple validation (only check separator + sequential)
-                    duplicata_valid = validate_duplicata_format_simple(duplicata)
-                    duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason_simple(duplicata)
+                    # No NFE - use simple validation (pass cedente and grupo for exception checking)
+                    duplicata_valid = validate_duplicata_format_simple(duplicata, cedente, grupo)
+                    duplicata_motivo = "" if duplicata_valid else get_invalid_duplicata_reason_simple(duplicata, cedente, grupo)
 
             # Validate SEUNO (only if NFEChave is valid and for cedentes with pre-impresso)
-            # Skip validation for products that don't require it (case-insensitive)
+            # For products in products_no_seuno_validation: SEUNO MUST be empty (case-insensitive)
             seuno_valid = True
             seuno_motivo = ""
             seuno_range = ""
@@ -1142,9 +1251,15 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
 
             if nfechave_valid:  # Only validate SEUNO if NFEChave is valid
                 if produto_upper in products_no_seuno_validation:
-                    # No SEUNO validation needed for these products
-                    seuno_valid = True
-                    seuno_motivo = ""
+                    # NEW LOGIC: These products MUST have empty SEUNO
+                    # If SEUNO is filled, it's invalid
+                    if seuno and seuno.strip():
+                        seuno_valid = False
+                        seuno_motivo = f"Produto {produto} não deve ter SEUNO preenchido"
+                    else:
+                        # SEUNO is empty/NULL - this is correct for these products
+                        seuno_valid = True
+                        seuno_motivo = ""
                 elif cedente in cedente_ranges:
                     # This cedente has pre-impresso ranges
                     ranges_list = cedente_ranges[cedente]
@@ -1261,6 +1376,7 @@ def query_valid_records_with_status_filter(session, target_date, invalid_record_
         APRCapa.CEDENTE == Cedente.apelido
     ).filter(
         cast(APRCapa.DATA, Date) == target_date,
+        cast(APRCapa.DATA, Date) <= date.today(),  # Never include future dates
         APRTitulos.NFEChave.isnot(None),
         APRTitulos.NFEChave != ''
     ).distinct()
@@ -1303,6 +1419,7 @@ def query_valid_records_with_status_filter(session, target_date, invalid_record_
         ProdutoCedente.IdProdutoAtributo == Produto.Id
     ).filter(
         cast(APRCapa.DATA, Date) == target_date,
+        cast(APRCapa.DATA, Date) <= date.today(),  # Never include future dates
         or_(
             APRTitulos.NFEChave.is_(None),
             APRTitulos.NFEChave == ''
@@ -1460,7 +1577,7 @@ def export_invalid_nfechave_to_excel(invalid_records, target_date):
     # Define headers
     headers = [
         'GERENTE', 'PROPOSTA', 'DATA', 'CEDENTE', 'EMPRESA', 'STATUS', 'RAMO',
-        'PRODUTO', 'MOTIVO_INVALIDO'
+        'PRODUTO', 'DUPLICATA', 'MOTIVO_INVALIDO'
     ]
 
     # Write headers with formatting
@@ -1484,7 +1601,8 @@ def export_invalid_nfechave_to_excel(invalid_records, target_date):
         ws.cell(row=row_num, column=6, value=record.get('STATUS'))
         ws.cell(row=row_num, column=7, value=record.get('RAMO'))
         ws.cell(row=row_num, column=8, value=record.get('PRODUTO'))
-        ws.cell(row=row_num, column=9, value=record.get('MOTIVO_INVALIDO'))
+        ws.cell(row=row_num, column=9, value=record.get('DUPLICATA'))
+        ws.cell(row=row_num, column=10, value=record.get('MOTIVO_INVALIDO'))
 
     # Auto-adjust column widths
     for col_num, header in enumerate(headers, 1):
@@ -1607,7 +1725,7 @@ def export_invalid_cheque_to_excel(invalid_records, target_date):
     # Define headers
     headers = [
         'GERENTE', 'PROPOSTA', 'DATA', 'CEDENTE', 'EMPRESA', 'STATUS', 'RAMO',
-        'PRODUTO', 'QTD_TITULOS', 'MOTIVO_INVALIDO'
+        'PRODUTO', 'DUPLICATA', 'QTD_TITULOS', 'MOTIVO_INVALIDO'
     ]
 
     # Write headers with formatting
@@ -1631,11 +1749,12 @@ def export_invalid_cheque_to_excel(invalid_records, target_date):
         ws.cell(row=row_num, column=6, value=record.get('STATUS'))
         ws.cell(row=row_num, column=7, value=record.get('RAMO'))
         ws.cell(row=row_num, column=8, value=record.get('PRODUTO'))
-        ws.cell(row=row_num, column=9, value=record.get('QTD_TITULOS'))
-        ws.cell(row=row_num, column=10, value=record.get('MOTIVO_INVALIDO'))
+        ws.cell(row=row_num, column=9, value=record.get('DUPLICATA'))
+        ws.cell(row=row_num, column=10, value=record.get('QTD_TITULOS'))
+        ws.cell(row=row_num, column=11, value=record.get('MOTIVO_INVALIDO'))
 
     # Auto-adjust column widths
-    for col_letter in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']:
+    for col_letter in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']:
         column = ws[col_letter]
         max_length = 0
         for cell in column:
