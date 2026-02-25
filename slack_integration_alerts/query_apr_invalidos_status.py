@@ -1077,7 +1077,6 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
         'NF SERV. PRE-IMPR. BMA FIDC',
         'NF SERV. BMA FIDC',
         'CCB',
-        'CONVENCIONAL BMA FIDC',
         'CHEQUE',
     ]
     # Convert to uppercase for case-insensitive comparison
