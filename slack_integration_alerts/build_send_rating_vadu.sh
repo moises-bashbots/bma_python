@@ -41,7 +41,8 @@ if [ -f "dist/send_rating_vadu" ]; then
     
     # Copy configuration files
     cp -f databases_config.json "$DEPLOY_DIR/" 2>/dev/null || echo "⚠ databases_config.json not found"
-    
+    cp -f rating_exceptions.json "$DEPLOY_DIR/" 2>/dev/null || echo "⚠ rating_exceptions.json not found"
+
     # Copy wrapper script
     cp -f run_send_rating_vadu.sh "$DEPLOY_DIR/"
     chmod +x "$DEPLOY_DIR/run_send_rating_vadu.sh"
