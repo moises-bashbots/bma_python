@@ -982,11 +982,16 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                         # Select the rating in the dropdown
                         if record.RAMO:
                             print(f"\n🎯 Selecting rating in dropdown...")
+                            print(f"   CEDENTE: {record.CEDENTE}")
                             print(f"   RAMO from database: {record.RAMO}")
                             print(f"   QTD_TITULOS: {record.QTD_TITULOS}")
 
+                            # Special case: ALIANCA cedente always uses SINTÉTICO
+                            if record.CEDENTE and record.CEDENTE.upper() == "ALIANCA":
+                                rating_value = "SINTÉTICO"
+                                print(f"   ⭐ ALIANCA cedente detected - using SINTÉTICO rating (special rule)")
                             # Check if QTD_TITULOS >= 700, use "SINTÉTICO" instead
-                            if record.QTD_TITULOS and record.QTD_TITULOS >= 700:
+                            elif record.QTD_TITULOS and record.QTD_TITULOS >= 700:
                                 rating_value = "SINTÉTICO"
                                 print(f"   ⚠ QTD_TITULOS >= 700, using SINTÉTICO rating")
                             else:
