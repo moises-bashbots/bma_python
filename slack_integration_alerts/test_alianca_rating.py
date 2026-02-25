@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Test script to verify ALIANCA cedente rating logic.
+Test script to verify cedente rating logic with configuration file.
 """
+
+import json
+from pathlib import Path
 
 # Mock record class for testing
 class MockRecord:
@@ -10,21 +13,44 @@ class MockRecord:
         self.RAMO = ramo
         self.QTD_TITULOS = qtd_titulos
 
-def determine_rating(record):
+def load_rating_exceptions():
+    """Load rating exceptions from configuration file."""
+    try:
+        config_path = Path(__file__).parent / 'rating_exceptions.json'
+        if not config_path.exists():
+            print(f"⚠ Rating exceptions file not found: {config_path}")
+            return []
+
+        with open(config_path) as f:
+            config = json.load(f)
+
+        cedentes = config.get('sintetico_cedentes', {}).get('cedentes', [])
+        # Convert to uppercase for case-insensitive comparison
+        cedentes_upper = [c.upper() for c in cedentes]
+
+        if cedentes_upper:
+            print(f"✓ Loaded {len(cedentes_upper)} cedente(s) with SINTÉTICO exception: {', '.join(cedentes_upper)}")
+
+        return cedentes_upper
+    except Exception as e:
+        print(f"⚠ Error loading rating exceptions: {e}")
+        return []
+
+def determine_rating(record, sintetico_cedentes):
     """
     Replicate the rating determination logic from send_rating_vadu.py
     """
     if not record.RAMO:
         return None
-    
-    # Special case: ALIANCA cedente always uses SINTÉTICO
-    if record.CEDENTE and record.CEDENTE.upper() == "ALIANCA":
-        return "SINTÉTICO", "ALIANCA cedente detected - using SINTÉTICO rating (special rule)"
-    
+
+    # Special case: Check if cedente is in SINTÉTICO exceptions list
+    if record.CEDENTE and record.CEDENTE.upper() in sintetico_cedentes:
+        return "SINTÉTICO", f"{record.CEDENTE} is in SINTÉTICO exceptions - using SINTÉTICO rating (from config)"
+
     # Check if QTD_TITULOS >= 700, use "SINTÉTICO" instead
     elif record.QTD_TITULOS and record.QTD_TITULOS >= 700:
         return "SINTÉTICO", "QTD_TITULOS >= 700, using SINTÉTICO rating"
-    
+
     else:
         # Remove the last character only if it's a space, plus, or minus
         if len(record.RAMO) > 0 and record.RAMO[-1] in [' ', '+', '-']:
@@ -33,7 +59,7 @@ def determine_rating(record):
         else:
             rating_value = record.RAMO
             reason = "Using RAMO as-is"
-        
+
         return rating_value, reason
 
 # Test cases
@@ -52,25 +78,29 @@ test_cases = [
 ]
 
 print("=" * 100)
-print("TESTING ALIANCA RATING LOGIC")
+print("TESTING RATING LOGIC WITH CONFIGURATION FILE")
 print("=" * 100)
+print()
+
+# Load configuration
+sintetico_cedentes = load_rating_exceptions()
 print()
 
 all_passed = True
 
 for cedente, ramo, qtd_titulos, expected_rating, description in test_cases:
     record = MockRecord(cedente, ramo, qtd_titulos)
-    rating, reason = determine_rating(record)
-    
+    rating, reason = determine_rating(record, sintetico_cedentes)
+
     passed = rating == expected_rating
     status = "✅ PASS" if passed else "❌ FAIL"
-    
+
     print(f"{status} | {description}")
     print(f"       Cedente: {cedente}, RAMO: {ramo}, QTD: {qtd_titulos}")
     print(f"       Expected: {expected_rating}, Got: {rating}")
     print(f"       Reason: {reason}")
     print()
-    
+
     if not passed:
         all_passed = False
 

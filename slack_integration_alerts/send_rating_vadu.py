@@ -48,6 +48,35 @@ def load_config():
         return json.load(f)
 
 
+def load_rating_exceptions():
+    """
+    Load rating exceptions configuration.
+
+    Returns a list of cedentes that should always use SINTÉTICO rating.
+    If the file doesn't exist or has errors, returns an empty list.
+    """
+    try:
+        config_path = Path.cwd() / 'rating_exceptions.json'
+        if not config_path.exists():
+            print(f"⚠ Rating exceptions file not found: {config_path}")
+            return []
+
+        with open(config_path) as f:
+            config = json.load(f)
+
+        cedentes = config.get('sintetico_cedentes', {}).get('cedentes', [])
+        # Convert to uppercase for case-insensitive comparison
+        cedentes_upper = [c.upper() for c in cedentes]
+
+        if cedentes_upper:
+            print(f"✓ Loaded {len(cedentes_upper)} cedente(s) with SINTÉTICO exception: {', '.join(cedentes_upper)}")
+
+        return cedentes_upper
+    except Exception as e:
+        print(f"⚠ Error loading rating exceptions: {e}")
+        return []
+
+
 def create_mariadb_session():
     """Create MariaDB session using SQLAlchemy."""
     config = load_config()
@@ -864,6 +893,9 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
     print("=" * 80)
     print()
 
+    # Load rating exceptions configuration
+    sintetico_cedentes = load_rating_exceptions()
+
     # Step 0: Query database for today's valid records
     print("Step 0: Querying database for valid records...")
     try:
@@ -986,10 +1018,10 @@ def send_rating_vadu(rating_group="RATING A", headless=True, dry_run=False, paus
                             print(f"   RAMO from database: {record.RAMO}")
                             print(f"   QTD_TITULOS: {record.QTD_TITULOS}")
 
-                            # Special case: ALIANCA cedente always uses SINTÉTICO
-                            if record.CEDENTE and record.CEDENTE.upper() == "ALIANCA":
+                            # Special case: Check if cedente is in SINTÉTICO exceptions list
+                            if record.CEDENTE and record.CEDENTE.upper() in sintetico_cedentes:
                                 rating_value = "SINTÉTICO"
-                                print(f"   ⭐ ALIANCA cedente detected - using SINTÉTICO rating (special rule)")
+                                print(f"   ⭐ {record.CEDENTE} is in SINTÉTICO exceptions - using SINTÉTICO rating (from config)")
                             # Check if QTD_TITULOS >= 700, use "SINTÉTICO" instead
                             elif record.QTD_TITULOS and record.QTD_TITULOS >= 700:
                                 rating_value = "SINTÉTICO"

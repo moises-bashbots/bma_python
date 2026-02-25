@@ -1,0 +1,9 @@
+{
+  "sintetico_cedentes": {
+    "description": "Cedentes that should ALWAYS use SINTÉTICO rating regardless of RAMO or QTD_TITULOS",
+    "cedentes": [
+      "ALIANCA"
+    ]
+  }
+}
+
