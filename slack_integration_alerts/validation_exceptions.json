@@ -12,6 +12,16 @@
       "PIRES DO RIO",
       "TETRAFERRO"
     ]
+  },
+  "seuno_product_cedente_exceptions": {
+    "description": "Product + Cedente combinations that should skip SEUNO validation (SEUNO can be missing or null)",
+    "exceptions": [
+      {
+        "product": "ESCROW",
+        "cedente": "CALLAMARYS",
+        "description": "ESCROW for CALLAMARYS does not require SEUNO"
+      }
+    ]
   }
 }
 

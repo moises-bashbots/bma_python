@@ -339,10 +339,16 @@ def load_validation_exceptions():
 
         # If no config file found, return empty exceptions
         print("⚠️  Warning: validation_exceptions.json not found - no exceptions will be applied")
-        return {"duplicata_separator_exceptions": {"grupos": [], "cedentes": []}}
+        return {
+            "duplicata_separator_exceptions": {"grupos": [], "cedentes": []},
+            "seuno_product_cedente_exceptions": {"exceptions": []}
+        }
     except Exception as e:
         print(f"⚠️  Warning: Error loading validation_exceptions.json: {e}")
-        return {"duplicata_separator_exceptions": {"grupos": [], "cedentes": []}}
+        return {
+            "duplicata_separator_exceptions": {"grupos": [], "cedentes": []},
+            "seuno_product_cedente_exceptions": {"exceptions": []}
+        }
 
 
 def should_skip_separator_validation(cedente: str, grupo: str) -> bool:
@@ -368,6 +374,37 @@ def should_skip_separator_validation(cedente: str, grupo: str) -> bool:
     grupo_upper = grupo.upper() if grupo else ""
 
     return cedente_upper in exception_cedentes or grupo_upper in exception_grupos
+
+
+def should_skip_seuno_validation(produto: str, cedente: str) -> bool:
+    """
+    Check if product+cedente combination is in the exception list for SEUNO validation.
+
+    Args:
+        produto: Product name (e.g., "ESCROW")
+        cedente: Cedente apelido (e.g., "CALLAMARYS")
+
+    Returns:
+        True if SEUNO validation should be skipped, False otherwise
+    """
+    exceptions = load_validation_exceptions()
+    seuno_exceptions = exceptions.get('seuno_product_cedente_exceptions', {})
+    exception_list = seuno_exceptions.get('exceptions', [])
+
+    # Case-insensitive comparison
+    produto_upper = produto.upper() if produto else ""
+    cedente_upper = cedente.upper() if cedente else ""
+
+    for exception in exception_list:
+        exception_produto = exception.get('product', '').upper()
+        exception_cedente = exception.get('cedente', '').upper()
+
+        # Check if product matches (exact or partial match)
+        # ESCROW matches both "ESCROW" and "ESCROW DEPÓSITO"
+        if exception_produto in produto_upper and cedente_upper == exception_cedente:
+            return True
+
+    return False
 
 
 # ============================================================================
@@ -1252,7 +1289,13 @@ def query_apr_invalidos_with_status(session, target_date=None, apply_status_filt
             verification_digit = ""
 
             if nfechave_valid:  # Only validate SEUNO if NFEChave is valid
-                if produto_upper in products_no_seuno_validation:
+                # Check for product+cedente exception FIRST
+                if should_skip_seuno_validation(produto, cedente):
+                    # This product+cedente combination is exempt from SEUNO validation
+                    # SEUNO can be missing, null, or any value - all are valid
+                    seuno_valid = True
+                    seuno_motivo = ""
+                elif produto_upper in products_no_seuno_validation:
                     # NEW LOGIC: These products MUST have empty SEUNO
                     # If SEUNO is filled, it's invalid
                     if seuno and seuno.strip():
