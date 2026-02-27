@@ -357,9 +357,64 @@ Use clear checkboxes in commit messages or documentation:
 ⬜ Step 6: Deploy
 ```
 
+## 14. Isolated Development Environments
+- **Always use virtual environments for Python dependencies**
+- Use `uv`, `venv`, or `.venv` for local dependency installation
+- Never install packages system-wide (avoid `pip install` without virtual environment)
+- Keep dependencies isolated per project
+
+**Benefits:**
+- Prevents version conflicts between projects
+- Reproducible development environments
+- Easier dependency management and tracking
+- Safe to experiment without affecting system Python
+- Matches production deployment practices
+
+**Example:**
+```bash
+✅ GOOD:
+# Using uv (recommended - faster)
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+
+# Or using standard venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+❌ BAD:
+# System-wide installation (dangerous!)
+sudo pip install package_name
+pip install package_name  # Without virtual environment active
+```
+
+**Project Setup:**
+```bash
+# 1. Create virtual environment (first time only)
+cd /home/robot/Dev/bma_python
+uv venv  # or: python3 -m venv .venv
+
+# 2. Activate virtual environment (every session)
+source .venv/bin/activate
+
+# 3. Install dependencies
+uv pip install -r requirements.txt
+
+# 4. Verify you're in virtual environment
+which python  # Should show: /home/robot/Dev/bma_python/.venv/bin/python
+```
+
+**Remember:**
+- Always activate virtual environment before installing packages
+- Add `.venv/` to `.gitignore` (virtual environments should not be committed)
+- Use `requirements.txt` to track dependencies
+- Deactivate with `deactivate` command when done
+
 ## Remember
 
 > "Code is read more often than it is written"
 > "Make it work, make it right, make it fast - in that order"
 > "Configuration over code, simplicity over complexity"
 > "Small steps, verified progress, production quality"
+> "Isolated environments, reproducible builds"
