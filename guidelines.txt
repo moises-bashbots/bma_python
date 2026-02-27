@@ -1,0 +1,236 @@
+# Development Guidelines
+
+## Core Principles
+
+### 1. Configuration Over Code
+- **Prefer configuration files over hardcoded values**
+- Use JSON/YAML files for business rules, exceptions, and settings
+- Benefits:
+  - No rebuild required for changes
+  - Easy to maintain and update
+  - Clear separation of logic and data
+  - Operators can make changes without developer intervention
+
+**Example:**
+```
+✅ GOOD: rating_exceptions.json with list of cedentes
+❌ BAD:  if cedente == "ALIANCA" hardcoded in the code
+```
+
+### 2. Modular Design
+- **One function, one responsibility**
+- Keep functions small and focused (< 50 lines ideally)
+- Extract reusable logic into separate functions
+- Use clear, descriptive function names
+
+**Example:**
+```python
+✅ GOOD: load_rating_exceptions(), determine_rating(), process_proposal()
+❌ BAD:  do_everything() with 500 lines
+```
+
+### 3. Separation of Concerns
+- **Separate data access, business logic, and presentation**
+- Database queries in one layer
+- Business rules in another layer
+- UI/output in another layer
+
+**Structure:**
+```
+- models.py          # Database models (ORM)
+- config_loader.py   # Configuration loading
+- business_logic.py  # Core business rules
+- main.py            # Orchestration and UI
+```
+
+### 4. Error Handling
+- **Fail gracefully with clear error messages**
+- Always use try/except for external operations (DB, files, network)
+- Log errors with context
+- Provide fallback behavior when possible
+
+**Example:**
+```python
+✅ GOOD:
+try:
+    config = load_config()
+except FileNotFoundError:
+    print("⚠ Config file not found, using defaults")
+    config = get_default_config()
+
+❌ BAD:
+config = load_config()  # Crashes if file missing
+```
+
+### 5. Explicit Over Implicit
+- **Be clear and obvious in your code**
+- Avoid magic numbers and strings
+- Use constants and enums
+- Document non-obvious behavior
+
+**Example:**
+```python
+✅ GOOD:
+QTD_TITULOS_THRESHOLD = 700
+if qtd_titulos >= QTD_TITULOS_THRESHOLD:
+    use_sintetico_rating()
+
+❌ BAD:
+if qtd_titulos >= 700:  # Why 700? What does this mean?
+    ...
+```
+
+### 6. DRY (Don't Repeat Yourself)
+- **Extract common patterns into reusable functions**
+- If you copy-paste code, consider refactoring
+- Create helper functions for repeated operations
+
+**Example:**
+```python
+✅ GOOD:
+def update_record_status(session, record_id, status):
+    # Reusable update logic with retry
+    ...
+
+❌ BAD:
+# Same update logic copy-pasted 5 times in different places
+```
+
+### 7. Testability
+- **Write code that can be easily tested**
+- Separate pure logic from side effects
+- Use dependency injection
+- Create test files alongside production code
+
+**Example:**
+```
+✅ GOOD:
+- send_rating_vadu.py
+- test_alianca_rating.py  # Tests the logic
+
+❌ BAD:
+- send_rating_vadu.py (no tests, hard to verify)
+```
+
+### 8. Documentation
+- **Code should be self-documenting, but add docs where needed**
+- Use docstrings for functions
+- Add README files for complex features
+- Document WHY, not just WHAT
+
+**Example:**
+```python
+✅ GOOD:
+def determine_rating(record, sintetico_cedentes):
+    """
+    Determine rating based on cedente exceptions and business rules.
+
+    Priority: Cedente exceptions > QTD >= 700 > RAMO-based
+    """
+
+❌ BAD:
+def determine_rating(record, sintetico_cedentes):
+    # No documentation
+```
+
+### 9. Logging and Observability
+- **Make it easy to understand what the program is doing**
+- Use clear, structured log messages
+- Include context in logs (cedente, proposta, etc.)
+- Use emoji/symbols for visual scanning (✅ ❌ ⚠ ℹ️)
+
+**Example:**
+```
+✅ GOOD:
+print(f"✓ Loaded {len(cedentes)} cedente(s): {', '.join(cedentes)}")
+print(f"⭐ {cedente} is in SINTÉTICO exceptions")
+
+❌ BAD:
+print("loaded")
+print("processing")
+```
+
+### 10. Backwards Compatibility
+- **Don't break existing functionality**
+- Add new features alongside old ones
+- Use feature flags for gradual rollout
+- Maintain database migrations
+
+**Example:**
+```python
+✅ GOOD:
+# New config-based approach with fallback
+sintetico_cedentes = load_rating_exceptions()
+if not sintetico_cedentes:
+    # Fallback to old behavior
+    ...
+
+❌ BAD:
+# Remove old code completely, breaking existing deployments
+```
+
+## Specific Patterns We Use
+
+### Configuration Files
+- `databases_config.json` - Database connections
+- `slack_config.json` - Slack integration settings
+- `validation_exceptions.json` - Validation rules
+- `rating_exceptions.json` - Rating business rules
+
+### Database Access
+- Use SQLAlchemy ORM for type safety
+- Define models in `models.py` (MSSQL) and `models_mariadb.py` (MariaDB)
+- Use sessions properly (create, use, close)
+- Handle connection errors gracefully
+
+### Binary Deployment
+- Build scripts in `build_*.sh`
+- Deploy to `/home/robot/Deploy/slack_integration_alerts/`
+- Include configuration files in deployment
+- Version binaries with timestamps
+
+### Testing
+- Create `test_*.py` files for new features
+- Test configuration loading
+- Test business logic separately from I/O
+- Run tests before committing
+
+## Code Review Checklist
+
+Before committing, ask yourself:
+
+- [ ] Can this be configured instead of hardcoded?
+- [ ] Is this function doing one thing well?
+- [ ] Are errors handled gracefully?
+- [ ] Is there clear logging?
+- [ ] Can this be tested easily?
+- [ ] Is it documented?
+- [ ] Does it follow existing patterns?
+- [ ] Will it work if config files are missing?
+
+## Anti-Patterns to Avoid
+
+❌ **Hardcoded business rules** - Use config files
+❌ **God functions** - Break into smaller pieces
+❌ **Silent failures** - Log and handle errors
+❌ **Magic numbers** - Use named constants
+❌ **Copy-paste code** - Extract to functions
+❌ **No error handling** - Always expect failures
+❌ **Unclear variable names** - Be explicit
+❌ **No tests** - Write tests for complex logic
+
+## When to Refactor
+
+Refactor when you notice:
+- Same code in multiple places
+- Functions longer than 50 lines
+- Hardcoded values that might change
+- Difficult to test
+- Difficult to understand
+- Difficult to modify
+
+## Remember
+
+> "Code is read more often than it is written"
+> "Make it work, make it right, make it fast - in that order"
+> "Configuration over code, simplicity over complexity"
