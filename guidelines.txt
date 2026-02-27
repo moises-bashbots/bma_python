@@ -229,8 +229,137 @@ Refactor when you notice:
 - Difficult to understand
 - Difficult to modify
 
+## 11. Incremental Development
+- **Break complex changes into small, manageable steps**
+- Complete and verify each step before moving to the next
+- Each step should be independently testable and deployable
+- Keep a clear checklist of completed vs. pending tasks
+
+**Benefits:**
+- Easier to debug when issues arise
+- Clear progress tracking
+- Reduced risk of breaking existing functionality
+- Easier code review process
+
+**Example:**
+```
+✅ GOOD:
+Step 1: Create configuration file ✅
+Step 2: Add config loading function ✅
+Step 3: Update business logic to use config ✅
+Step 4: Add tests ✅
+Step 5: Update build script ✅
+Step 6: Deploy and verify ✅
+
+❌ BAD:
+- Change everything at once
+- No clear steps or checkpoints
+- Difficult to track what's done vs. what's pending
+```
+
+## 12. No Workarounds or Temporary Fixes
+- **Always implement the correct, permanent solution**
+- Avoid "quick fixes" that create technical debt
+- If a temporary solution is absolutely necessary, document it clearly with a TODO and timeline
+- Refactor immediately when you identify a better approach
+
+**Example:**
+```
+✅ GOOD:
+# Implement proper configuration-based approach
+sintetico_cedentes = load_rating_exceptions()
+
+❌ BAD:
+# TODO: This is temporary, fix later
+if cedente == "ALIANCA":  # Hardcoded for now
+    ...
+```
+
+**Why this matters:**
+- Temporary fixes rarely get fixed later
+- They accumulate as technical debt
+- They make the codebase harder to maintain
+- They confuse future developers
+
+## 13. Production-Grade Quality Standards
+- **Write code as if it will run in production forever**
+- No shortcuts, no "good enough for now"
+- Every commit should be production-ready
+- Consider edge cases, error scenarios, and failure modes
+
+**Quality Checklist:**
+- [ ] Proper error handling for all external operations
+- [ ] Clear logging for debugging and monitoring
+- [ ] Configuration-driven (no hardcoded values)
+- [ ] Tested with real-world scenarios
+- [ ] Documented for future maintainers
+- [ ] Handles missing files, network errors, database failures
+- [ ] Backwards compatible or has migration path
+- [ ] Performance considerations addressed
+
+**Example:**
+```
+✅ GOOD:
+def load_config():
+    """Load configuration with proper error handling."""
+    try:
+        config_path = Path.cwd() / 'config.json'
+        if not config_path.exists():
+            logger.warning(f"Config not found: {config_path}, using defaults")
+            return get_default_config()
+
+        with open(config_path) as f:
+            config = json.load(f)
+
+        validate_config(config)  # Ensure config is valid
+        return config
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in config: {e}")
+        return get_default_config()
+    except Exception as e:
+        logger.error(f"Unexpected error loading config: {e}")
+        raise
+
+❌ BAD:
+def load_config():
+    # Quick and dirty - will fix later
+    with open('config.json') as f:
+        return json.load(f)
+```
+
+**Remember:**
+- Production code will be read, modified, and debugged by others
+- It will run in critical business processes
+- Failures can have real business impact
+- Quality now saves time and headaches later
+
+## Development Workflow
+
+### For Every Feature or Fix:
+
+1. **Plan** - Break into small steps, create checklist
+2. **Implement** - One step at a time, verify each step
+3. **Test** - Write tests, verify functionality
+4. **Review** - Check against quality standards
+5. **Document** - Update README, add comments
+6. **Deploy** - Deploy incrementally, verify in production
+7. **Monitor** - Check logs, verify expected behavior
+
+### Track Your Progress:
+
+Use clear checkboxes in commit messages or documentation:
+```
+✅ Step 1: Create config file
+✅ Step 2: Add loading function
+✅ Step 3: Update business logic
+⏳ Step 4: Add tests (in progress)
+⬜ Step 5: Update build script
+⬜ Step 6: Deploy
+```
+
 ## Remember
 
 > "Code is read more often than it is written"
 > "Make it work, make it right, make it fast - in that order"
 > "Configuration over code, simplicity over complexity"
+> "Small steps, verified progress, production quality"
