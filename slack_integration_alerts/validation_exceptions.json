@@ -1,0 +1,17 @@
+{
+  "duplicata_separator_exceptions": {
+    "description": "Grupos and cedentes that should skip the separator (- or /) validation in DUPLICATA format",
+    "grupos": [
+      "CEDRO",
+      "INDISA",
+      "SYL"
+    ],
+    "cedentes": [
+      "RIOMAR",
+      "BISCOITOS NINFA",
+      "PIRES DO RIO",
+      "TETRAFERRO"
+    ]
+  }
+}
+
