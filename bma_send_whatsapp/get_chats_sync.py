@@ -274,10 +274,12 @@ def sync_chat_to_db(conn, chat_data: dict) -> tuple[str, str]:
     sql = """
         INSERT INTO contato_whatsapp (
             phone, name, pinned, messagesUnread, unread, lastMessageTime,
-            isGroupAnnouncement, archived, isGroup, isMuted, isMarkedSpam, cedente_grupo
+            isGroupAnnouncement, archived, isGroup, isMuted, isMarkedSpam, cedente_grupo,
+            last_sync_at
         ) VALUES (
             %(phone)s, %(name)s, %(pinned)s, %(messagesUnread)s, %(unread)s, %(lastMessageTime)s,
-            %(isGroupAnnouncement)s, %(archived)s, %(isGroup)s, %(isMuted)s, %(isMarkedSpam)s, %(cedente_grupo)s
+            %(isGroupAnnouncement)s, %(archived)s, %(isGroup)s, %(isMuted)s, %(isMarkedSpam)s, %(cedente_grupo)s,
+            NOW()
         )
         ON DUPLICATE KEY UPDATE
             name = VALUES(name),
@@ -290,7 +292,8 @@ def sync_chat_to_db(conn, chat_data: dict) -> tuple[str, str]:
             isGroup = VALUES(isGroup),
             isMuted = VALUES(isMuted),
             isMarkedSpam = VALUES(isMarkedSpam),
-            cedente_grupo = VALUES(cedente_grupo)
+            cedente_grupo = VALUES(cedente_grupo),
+            last_sync_at = NOW()
     """
 
     try:
@@ -319,6 +322,174 @@ def sync_chat_to_db(conn, chat_data: dict) -> tuple[str, str]:
     return action, chat_data['phone']
 
 
+def delete_inactive_contacts(conn, days: int = 30) -> int:
+    """
+    Delete contacts that have not been seen in the last N sync runs.
+
+    A contact is considered inactive when its last_sync_at is older than
+    `days` days, meaning it was not returned by Z-API in any recent sync.
+    Contacts whose last_sync_at is NULL (column just added, not yet synced)
+    are left untouched.
+
+    Args:
+        conn: Database connection
+        days: Number of days of inactivity before deletion (default: 30)
+
+    Returns:
+        Number of rows deleted
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        DELETE FROM contato_whatsapp
+        WHERE last_sync_at IS NOT NULL
+          AND last_sync_at < NOW() - INTERVAL %s DAY
+        """,
+        (days,)
+    )
+    deleted = cursor.rowcount
+    cursor.close()
+    return deleted
+
+
+def fix_duplicate_cedente_groups(conn) -> dict:
+    """
+    Detect and fix duplicate groups for the same cedente_grupo.
+
+    When multiple groups exist for the same cedente_grupo, this function:
+    1. Identifies duplicates
+    2. Keeps the most recently active group (highest lastMessageTime)
+    3. Deletes older/inactive duplicates
+    4. Fixes malformed names (removes phone numbers in parentheses)
+
+    Pattern enforcement: {CEDENTE} X {COMPANY}
+    Example: "ALPA X BMA" (not "Alpa X BMA (120363406844884243-group)")
+
+    Args:
+        conn: Database connection
+
+    Returns:
+        Dictionary with statistics: {
+            'duplicates_found': int,
+            'groups_deleted': int,
+            'names_fixed': int,
+            'cedentes_affected': list
+        }
+    """
+    cursor = conn.cursor(dictionary=True)
+
+    stats = {
+        'duplicates_found': 0,
+        'groups_deleted': 0,
+        'names_fixed': 0,
+        'cedentes_affected': []
+    }
+
+    # Find cedentes with multiple groups
+    cursor.execute("""
+        SELECT cedente_grupo, COUNT(*) as group_count
+        FROM contato_whatsapp
+        WHERE isGroup = 1
+          AND cedente_grupo IS NOT NULL
+          AND cedente_grupo != ''
+        GROUP BY cedente_grupo
+        HAVING COUNT(*) > 1
+        ORDER BY cedente_grupo
+    """)
+
+    duplicates = cursor.fetchall()
+
+    if not duplicates:
+        cursor.close()
+        return stats
+
+    stats['duplicates_found'] = len(duplicates)
+
+    print(f"\n  Found {len(duplicates)} cedente(s) with multiple groups:")
+
+    for dup in duplicates:
+        cedente = dup['cedente_grupo']
+        count = dup['group_count']
+
+        # Get all groups for this cedente
+        cursor.execute("""
+            SELECT id_contato_whatsapp, name, phone, lastMessageTime,
+                   messagesUnread, isGroup
+            FROM contato_whatsapp
+            WHERE cedente_grupo = %s
+              AND isGroup = 1
+            ORDER BY lastMessageTime DESC
+        """, (cedente,))
+
+        groups = cursor.fetchall()
+
+        # Check if these are intentionally different groups (different purposes)
+        # Groups with different purposes have distinct names beyond the pattern
+        unique_names = set()
+        for g in groups:
+            # Extract the part after "X BMA" or similar patterns
+            name_upper = g['name'].upper()
+            if ' X BMA' in name_upper:
+                suffix = name_upper.split(' X BMA', 1)[1].strip()
+                # Remove phone numbers in parentheses
+                if '(' in suffix and '-GROUP)' in suffix:
+                    suffix = ''
+                unique_names.add(suffix)
+            else:
+                unique_names.add(g['name'])
+
+        # If all groups have the same suffix (or no suffix), they are duplicates
+        # If they have different suffixes (e.g., "Operações", "Cedentes"), keep all
+        if len(unique_names) <= 1:
+            # These are true duplicates - keep only the most active one
+            keep_group = groups[0]  # Most recent lastMessageTime
+            delete_groups = groups[1:]  # All others
+
+            print(f"\n    {cedente}: {count} duplicate groups found")
+            print(f"      ✓ Keeping: {keep_group['name']} (ID: {keep_group['id_contato_whatsapp']})")
+
+            # Fix the name if it has phone number appended
+            if '(' in keep_group['name'] and '-group)' in keep_group['name']:
+                # Extract clean name (remove phone number in parentheses)
+                clean_name = keep_group['name'].split('(')[0].strip()
+
+                # Ensure it follows the pattern: {CEDENTE} X {COMPANY}
+                # Normalize the 'X' to uppercase
+                if ' x ' in clean_name.lower():
+                    parts = clean_name.split(' x ', 1)
+                    if len(parts) == 2:
+                        clean_name = f"{parts[0].strip()} X {parts[1].strip()}"
+
+                cursor.execute("""
+                    UPDATE contato_whatsapp
+                    SET name = %s
+                    WHERE id_contato_whatsapp = %s
+                """, (clean_name, keep_group['id_contato_whatsapp']))
+
+                print(f"      ✓ Fixed name: '{keep_group['name']}' → '{clean_name}'")
+                stats['names_fixed'] += 1
+
+            # Delete duplicates
+            for del_group in delete_groups:
+                cursor.execute("""
+                    DELETE FROM contato_whatsapp
+                    WHERE id_contato_whatsapp = %s
+                """, (del_group['id_contato_whatsapp'],))
+
+                print(f"      ✗ Deleted: {del_group['name']} (ID: {del_group['id_contato_whatsapp']})")
+                stats['groups_deleted'] += 1
+
+            stats['cedentes_affected'].append(cedente)
+        else:
+            # These are intentionally different groups (e.g., different departments)
+            print(f"\n    {cedente}: {count} groups (different purposes - keeping all)")
+            for g in groups:
+                print(f"      - {g['name']}")
+
+    cursor.close()
+    return stats
+
+
 def sync_chats_to_db(chats: list) -> dict:
     """
     Sync all chats to database.
@@ -335,9 +506,14 @@ def sync_chats_to_db(chats: list) -> dict:
         'total': len(chats),
         'inserted': 0,
         'updated': 0,
+        'deleted': 0,
         'errors': 0,
         'groups': 0,
-        'groups_with_cedente': 0
+        'groups_with_cedente': 0,
+        'duplicates_found': 0,
+        'duplicate_groups_deleted': 0,
+        'names_fixed': 0,
+        'cedentes_affected': []
     }
 
     print("\n" + "=" * 80)
@@ -371,6 +547,18 @@ def sync_chats_to_db(chats: list) -> dict:
             stats['errors'] += 1
             print(f"  ✗ Error syncing {chat.get('phone', 'unknown')}: {e}")
 
+    # Delete contacts not seen in the last 30 days
+    print("\n  Cleaning up inactive contacts (not seen in 30+ days)...")
+    stats['deleted'] = delete_inactive_contacts(conn, days=30)
+
+    # Fix duplicate cedente groups
+    print("\n  Verifying and fixing duplicate cedente groups...")
+    dup_stats = fix_duplicate_cedente_groups(conn)
+    stats['duplicates_found'] = dup_stats['duplicates_found']
+    stats['duplicate_groups_deleted'] = dup_stats['groups_deleted']
+    stats['names_fixed'] = dup_stats['names_fixed']
+    stats['cedentes_affected'] = dup_stats['cedentes_affected']
+
     # Commit all changes
     conn.commit()
     conn.close()
@@ -386,11 +574,19 @@ def print_stats(stats: dict) -> None:
     print(f"Total chats:              {stats['total']}")
     print(f"  Inserted (new):         {stats['inserted']}")
     print(f"  Updated (existing):     {stats['updated']}")
+    print(f"  Deleted (inactive):     {stats['deleted']}")
     print(f"  Errors:                 {stats['errors']}")
     print()
     print(f"Groups:                   {stats['groups']}")
     print(f"  With cedente_grupo:     {stats['groups_with_cedente']}")
     print(f"  Without cedente_grupo:  {stats['groups'] - stats['groups_with_cedente']}")
+    print()
+    print(f"Duplicate Detection:")
+    print(f"  Cedentes with duplicates: {stats['duplicates_found']}")
+    print(f"  Duplicate groups deleted: {stats['duplicate_groups_deleted']}")
+    print(f"  Names fixed:              {stats['names_fixed']}")
+    if stats['cedentes_affected']:
+        print(f"  Affected cedentes:        {', '.join(stats['cedentes_affected'])}")
     print("=" * 80)
 
 
