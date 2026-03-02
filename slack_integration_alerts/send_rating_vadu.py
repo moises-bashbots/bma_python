@@ -272,49 +272,23 @@ def confirm_processed_records(rating_group="RATING A", headless=True, dry_run=Fa
                 if record.PROPOSTA not in visible_proposal_numbers
             ]
 
-            # Mark invisible proposals as confirmed (they're likely already processed/archived)
-            if len(invisible_confirmation_records) > 0 and not dry_run and session:
-                print(f"\n📝 Marking {len(invisible_confirmation_records)} invisible proposals as confirmed...")
-                print(f"   (These proposals are not in the table, likely already processed/archived)")
-
-                from sqlalchemy import text
-
-                for record in invisible_confirmation_records:
-                    max_retries = 3
-                    retry_delay = 1
-
-                    for attempt in range(max_retries):
-                        try:
-                            update_sql = text("""
-                                UPDATE apr_valid_records
-                                SET is_confirmado = 1
-                                WHERE DATA = :data
-                                AND PROPOSTA = :proposta
-                                AND CEDENTE = :cedente
-                                AND RAMO = :ramo
-                            """)
-                            session.execute(update_sql, {
-                                'data': record.DATA,
-                                'proposta': record.PROPOSTA,
-                                'cedente': record.CEDENTE,
-                                'ramo': record.RAMO
-                            })
-                            session.commit()
-                            print(f"   ✓ Proposta {record.PROPOSTA} ({record.CEDENTE}) marked as confirmed (not in table)")
-                            break
-                        except Exception as e:
-                            session.rollback()
-                            if attempt < max_retries - 1:
-                                print(f"   ⚠ Database update failed (attempt {attempt + 1}/{max_retries}): {e}")
-                                time.sleep(retry_delay)
-                            else:
-                                print(f"   ❌ Could not mark Proposta {record.PROPOSTA} as confirmed after {max_retries} attempts: {e}")
+            # DO NOT automatically mark invisible proposals as confirmed
+            # They might be on a different page, filtered out, or extraction failed
+            # Leave them as unconfirmed so they can be retried later
+            if len(invisible_confirmation_records) > 0:
+                print(f"\n⚠️  Found {len(invisible_confirmation_records)} proposals NOT visible in table:")
+                for record in invisible_confirmation_records[:10]:
+                    print(f"   - Proposta {record.PROPOSTA} ({record.CEDENTE}) - NOT visible, will retry later")
+                if len(invisible_confirmation_records) > 10:
+                    print(f"   ... and {len(invisible_confirmation_records) - 10} more")
+                print(f"\n   These proposals will remain unconfirmed and be retried in the next run")
+                print(f"   Possible reasons: pagination, filtering, extraction failure, or timing issues")
 
             if len(visible_confirmation_records) == 0:
                 print(f"\n⚠ None of the {len(confirmation_records)} records needing confirmation are visible in the table")
                 print(f"   Total visible proposals: {len(visible_proposal_numbers)}")
                 print(f"   Total records needing confirmation: {len(confirmation_records)}")
-                print(f"   Invisible records marked as confirmed: {len(invisible_confirmation_records)}")
+                print(f"   Invisible records (will retry later): {len(invisible_confirmation_records)}")
                 print(f"\n✓ Nothing to confirm in table - closing browser")
                 if session:
                     session.close()
@@ -324,7 +298,7 @@ def confirm_processed_records(rating_group="RATING A", headless=True, dry_run=Fa
             print(f"\n✓ Found {len(visible_confirmation_records)} records that are both visible AND need confirmation")
             print(f"   (Out of {len(confirmation_records)} total records needing confirmation)")
             if len(invisible_confirmation_records) > 0:
-                print(f"   ({len(invisible_confirmation_records)} invisible records already marked as confirmed)")
+                print(f"   ({len(invisible_confirmation_records)} invisible records will be retried later)")
 
             # Process each visible confirmation record
             print(f"\n📋 Confirming {len(visible_confirmation_records)} visible proposals...")
